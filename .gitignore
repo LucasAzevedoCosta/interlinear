@@ -1,0 +1,26 @@
+# Chaves de API e dados de projeto nunca entram no repositório.
+settings.json
+*.epub
+!tests/fixtures/*.epub
+data/
+dados/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Fixtures geradas
+tests/fixtures/*.pdf
+
+# Sistema
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.claude/settings.local.json

@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Interlinear</title>
+<link rel="stylesheet" href="/styles.css"/>
+</head>
+<body>
+
+<div class="app">
+
+  <header class="bar">
+    <span class="bar__mark">Interlinear</span>
+
+    <div class="bar__book" id="bookBar" hidden>
+      <input class="bar__title" id="bookTitle" aria-label="Título do livro"/>
+      <span class="bar__stat" id="bookStat"></span>
+    </div>
+
+    <div class="progress" id="progress" hidden>
+      <span id="progressLabel"></span>
+      <span class="progress__track"><span class="progress__fill" id="progressFill"></span></span>
+      <button class="btn btn--quiet" id="stopBtn">Parar</button>
+    </div>
+
+    <div class="bar__actions">
+      <button class="btn btn--quiet" id="homeBtn" hidden>Projetos</button>
+      <button class="btn" id="translateBtn" hidden>Traduzir</button>
+      <button class="btn" id="exportBtn" hidden>Exportar EPUB</button>
+      <button class="btn btn--quiet" id="settingsBtn">Configurações</button>
+    </div>
+  </header>
+
+  <main class="workbench" id="workbench" data-preview="shown">
+
+    <!-- Tela inicial: importar ou retomar -->
+    <section class="start" id="start">
+      <div class="start__inner">
+        <h1>Converta, revise e traduza um livro inteiro</h1>
+        <p class="lede">
+          Importe um PDF ou EPUB. O Interlinear reconstrói capítulos e parágrafos,
+          traduz com o modelo que você escolher e mostra cada página como ela
+          vai sair no leitor.
+        </p>
+
+        <div class="drop" id="drop">
+          <button class="btn btn--primary" id="pickBtn">Escolher arquivo</button>
+          <p class="drop__hint">ou arraste um .pdf ou .epub para cá</p>
+          <input type="file" id="fileInput" accept=".pdf,.epub" hidden/>
+        </div>
+
+        <div class="projects">
+          <p class="projects__head">Seus livros</p>
+          <div id="projectList"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bancada -->
+    <nav class="rail" id="rail" hidden aria-label="Capítulos">
+      <div class="rail__head">
+        <span>Capítulos</span>
+        <span id="chapterCount"></span>
+      </div>
+      <div class="rail__list" id="chapterList"></div>
+    </nav>
+
+    <section class="editor" id="editor" hidden>
+      <div class="editor__inner" id="editorInner"></div>
+    </section>
+
+    <aside class="preview" id="preview" hidden>
+      <div class="preview__head">
+        <span class="toggle">
+          <button id="viewTranslated" aria-pressed="true">Tradução</button>
+          <button id="viewOriginal" aria-pressed="false">Original</button>
+        </span>
+        <span style="flex:1"></span>
+        <button class="btn btn--quiet" id="refreshPreview">Atualizar</button>
+      </div>
+      <div class="preview__frame-wrap">
+        <iframe class="preview__frame" id="previewFrame" title="Prévia do capítulo"></iframe>
+      </div>
+    </aside>
+
+  </main>
+</div>
+
+<!-- Painel de configurações -->
+<div class="sheet" id="settingsSheet" hidden>
+  <div class="sheet__panel" role="dialog" aria-label="Configurações">
+    <div class="sheet__head">
+      <h2>Configurações</h2>
+      <button class="btn btn--quiet" id="closeSettings">Fechar</button>
+    </div>
+
+    <p class="field__hint" style="margin-bottom:16px">
+      As chaves ficam só nesta máquina, num arquivo que apenas o seu usuário lê.
+      Elas são enviadas unicamente para o provedor que você escolher.
+    </p>
+
+    <div id="providerList"></div>
+
+    <hr class="section-rule"/>
+    <h3 style="font-size:13px;font-weight:600;margin:0 0 12px">Adicionar provedor</h3>
+
+    <div class="field">
+      <label for="pKind">Serviço</label>
+      <select id="pKind"></select>
+      <p class="field__hint" id="pHint"></p>
+    </div>
+
+    <div class="field">
+      <label for="pLabel">Nome deste perfil</label>
+      <input type="text" id="pLabel" placeholder="Ex.: Gemini barato"/>
+    </div>
+
+    <div class="field">
+      <label for="pBase">Endereço da API</label>
+      <input type="text" id="pBase"/>
+    </div>
+
+    <div class="field" id="keyField">
+      <label for="pKey">Chave de API</label>
+      <input type="password" id="pKey" placeholder="cole aqui" autocomplete="off"/>
+    </div>
+
+    <div class="field">
+      <label for="pModel">Modelo</label>
+      <div class="row">
+        <input type="text" id="pModel" placeholder="ex.: gemini-2.5-flash" list="modelOptions"/>
+        <button class="btn" id="loadModels" style="flex:0 0 auto">Listar modelos</button>
+      </div>
+      <datalist id="modelOptions"></datalist>
+    </div>
+
+    <div class="row">
+      <button class="btn btn--primary" id="saveProvider">Salvar provedor</button>
+      <button class="btn" id="testProvider">Testar conexão</button>
+    </div>
+
+    <hr class="section-rule"/>
+    <h3 style="font-size:13px;font-weight:600;margin:0 0 12px">Tradução</h3>
+
+    <div class="row">
+      <div class="field">
+        <label for="srcLang">Idioma de origem</label>
+        <input type="text" id="srcLang"/>
+      </div>
+      <div class="field">
+        <label for="tgtLang">Idioma de destino</label>
+        <input type="text" id="tgtLang"/>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="styleNotes">Instruções de estilo</label>
+      <textarea id="styleNotes" placeholder="Ex.: mantenha o tratamento por 'você'. Preserve o tom seco do narrador."></textarea>
+    </div>
+
+    <div class="field">
+      <label for="glossary">Glossário</label>
+      <textarea id="glossary" placeholder="termo original = tradução&#10;Shire = Condado"></textarea>
+      <p class="field__hint">
+        Um par por linha. Vai em todo lote, o que mantém nomes e termos iguais
+        do começo ao fim do livro.
+      </p>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label for="batchChars">Tamanho do lote</label>
+        <input type="number" id="batchChars" min="500" max="20000" step="250"/>
+        <p class="field__hint">Caracteres por pedido.</p>
+      </div>
+      <div class="field">
+        <label for="concurrency">Pedidos simultâneos</label>
+        <input type="number" id="concurrency" min="1" max="16"/>
+        <p class="field__hint">Reduza se bater limite de taxa.</p>
+      </div>
+    </div>
+
+    <button class="btn btn--primary" id="saveSettings">Salvar preferências</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

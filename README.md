@@ -1,0 +1,187 @@
+# Interlinear
+
+Converte PDF em EPUB, deixa você editar o resultado com prévia ao vivo e traduz
+o livro inteiro usando o modelo de IA que você escolher — na nuvem ou rodando
+na sua própria máquina.
+
+Roda inteiramente no seu computador. Nenhum texto sai dele, a não ser para o
+provedor de IA que você configurar.
+
+![Três painéis: capítulos, editor bilíngue e prévia da página](docs/bancada.png)
+
+## Por que existe
+
+Ferramentas de conversão de PDF para EPUB resolvem metade do problema: produzem
+um arquivo, mas a estrutura sai torta e não há onde arrumar. Tradutores
+automáticos resolvem a outra metade, mas tratam um livro como se fosse um texto
+grande, e o resultado perde consistência de nomes e termos ao longo dos
+capítulos.
+
+O Interlinear junta as duas coisas num lugar só, com um princípio: **o original nunca
+é descartado**. Cada parágrafo guarda o texto de origem ao lado da tradução, e
+você revisa os dois lado a lado. A prévia usa o mesmo gerador de XHTML da
+exportação, então o que aparece na tela é exatamente o que vai para o arquivo.
+
+## O que ele faz
+
+- **Importa** PDFs com texto nativo e EPUBs existentes
+- **Reconstrói** capítulos, títulos e parágrafos a partir das pistas
+  tipográficas do PDF (tamanho de fonte, recuo, espaçamento), descartando
+  cabeçalhos correntes e números de página
+- **Edita** parágrafo a parágrafo, com salvamento automático
+- **Mostra a prévia** de cada capítulo como ele vai aparecer no leitor
+- **Traduz** com OpenAI, Anthropic, Google Gemini, qualquer endpoint compatível
+  (OpenRouter, DeepSeek, Groq), ou modelos locais via LM Studio e Ollama
+- **Exporta** EPUB 3 válido, com a tradução ou com o original
+
+## Documentação
+
+| Assunto | Arquivo |
+| ------- | ------- |
+| Formato EPUB, aparelhos compatíveis, ferramentas, IA local no Mac, decisões técnicas | [docs/guia.md](docs/guia.md) |
+| Por que converter PDF é difícil, limitações, papel do preview, custos de IA | [docs/conversao.md](docs/conversao.md) |
+| Licenças das dependências e a armadilha do AGPL | [docs/licencas.md](docs/licencas.md) |
+
+Abrindo o projeto pela primeira vez, comece pelo [guia](docs/guia.md).
+
+## Instalação
+
+Requer Python 3.11 ou mais recente.
+
+```bash
+git clone <url-do-seu-repositorio> interlinear
+cd interlinear
+
+python3 -m venv .venv
+source .venv/bin/activate        # no Windows: .venv\Scripts\activate
+
+pip install -r requirements.txt
+```
+
+## Como usar
+
+```bash
+cd backend
+python -m uvicorn app.main:app --port 8000
+```
+
+Abra `http://127.0.0.1:8000`. O servidor escuta só em `127.0.0.1`, ou seja,
+nada responde na rede local.
+
+1. Arraste um PDF ou EPUB para a área de importação
+2. Em **Configurações**, adicione um provedor de IA e cole sua chave
+3. Abra o livro e clique em **Traduzir**
+4. Revise os parágrafos no painel central, conferindo na prévia à direita
+5. **Exportar EPUB**
+
+### Escolhendo um modelo
+
+Para tradução literária, o custo é dominado pelo volume: um romance de 100 mil
+palavras gasta na casa de 250 a 400 mil tokens de entrada e outro tanto de
+saída. Compensa testar um capítulo em dois ou três modelos e comparar antes de
+soltar o livro inteiro.
+
+Modelos locais (LM Studio, Ollama) não têm custo por token e mantêm o texto na
+sua máquina, ao preço de mais tempo de processamento. Num Mac com Apple
+Silicon, um modelo de 12B a 14B em 4 bits é um bom ponto de partida.
+
+### Glossário
+
+Em **Configurações → Glossário**, um par por linha:
+
+```
+Shire = Condado
+Baggins = Bolseiro
+```
+
+O glossário é injetado em todo lote enviado ao modelo, que é o que mantém nomes
+e termos iguais do começo ao fim do livro.
+
+## Variáveis de ambiente
+
+| Variável             | Para quê                                           |
+| -------------------- | -------------------------------------------------- |
+| `INTERLINEAR_DATA_DIR`     | Onde ficam projetos e preferências                 |
+| `INTERLINEAR_HOST`         | Endereço de escuta (padrão `127.0.0.1`)            |
+| `INTERLINEAR_PORT`         | Porta (padrão `8000`)                              |
+| `INTERLINEAR_OPENAI_KEY`   | Chave da OpenAI, tem prioridade sobre a salva       |
+| `INTERLINEAR_ANTHROPIC_KEY`| Idem, Anthropic                                     |
+| `INTERLINEAR_GOOGLE_KEY`   | Idem, Google                                        |
+| `INTERLINEAR_LOG_LEVEL`    | `DEBUG` para ver o que o extrator decidiu           |
+
+Usar as variáveis de ambiente evita gravar chave nenhuma em disco.
+
+## Testes
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+A suíte gera um PDF de teste com as armadilhas que aparecem em livros reais —
+cabeçalho corrente, numeração, parágrafo que atravessa a quebra de página,
+diálogo com travessão — e confere o caminho completo até o EPUB e de volta.
+
+## Como está organizado
+
+```
+backend/app/
+  core/            nada aqui sabe que existe uma web ou uma IA
+    blocks.py      estrutura de dados comum a tudo
+    pdf_extract.py PDF → blocos, via pistas tipográficas
+    structure.py   blocos → capítulos
+    epub_write.py  capítulos → EPUB 3
+    epub_read.py   EPUB → blocos
+    storage.py     projetos em disco, gravação atômica
+  ai/
+    base.py        interface comum, retentativa com espera exponencial
+    providers.py   OpenAI, Anthropic, Google, Ollama, LM Studio
+    translator.py  lotes, glossário, contexto, verificação de formato
+  routes/          HTTP
+frontend/          JavaScript puro, sem build
+```
+
+A regra que mantém isso navegável: `core/` não importa nada de `ai/` nem de
+`routes/`. Dá para usar o conversor como biblioteca, sem subir servidor:
+
+```python
+from app.core.pdf_extract import extract_blocks
+from app.core.structure import split_into_chapters
+from app.core.epub_write import write_epub
+from app.core.blocks import Document
+
+blocks, title = extract_blocks("livro.pdf", source_name="livro.pdf")
+doc = Document(title=title)
+doc.chapters = split_into_chapters(blocks)
+write_epub(doc, "livro.epub")
+```
+
+## Limitações conhecidas
+
+- **PDFs escaneados não funcionam.** Sem OCR, não há texto para extrair. O app
+  avisa em vez de produzir um EPUB vazio.
+- **Layout de duas colunas** sai fora de ordem. PDFs acadêmicos sofrem mais.
+- **Imagens de PDF ainda não são extraídas** (as de EPUB são preservadas).
+- **Itálico do PDF é descartado** na extração.
+- **Notas de rodapé** entram como parágrafos comuns.
+- **Tabelas** viram parágrafos soltos.
+
+A lista completa, com a explicação de por que a conversão de PDF é um problema
+inverso, como o preview compensa, onde um modelo de IA ajudaria e quanto isso
+custa, está em [docs/conversao.md](docs/conversao.md).
+
+Nada disso se aplica quando a origem é um EPUB: ali a estrutura já vem pronta
+no arquivo.
+
+## Licença
+
+MIT, veja [LICENSE](LICENSE). Todas as dependências têm licença permissiva, o
+que torna essa escolha possível — detalhes e armadilhas em
+[docs/licencas.md](docs/licencas.md).
+
+## Sobre direitos autorais das obras
+
+Converter e traduzir um livro para uso pessoal é uma coisa; publicar ou
+distribuir a tradução é outra, e depende de autorização de quem detém os
+direitos. Esta ferramenta não verifica nada disso — a responsabilidade é de
+quem usa.
