@@ -14,6 +14,7 @@ Nenhuma chave é enviada para lugar nenhum além do endpoint do próprio provedo
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 import httpx
@@ -28,6 +29,11 @@ from .base import (
     classify_status,
     extract_error_message,
 )
+
+# Servidores locais. Dentro de um container, "localhost" é o próprio container,
+# então o Docker aponta essas variáveis para host.docker.internal.
+OLLAMA_URL = os.environ.get("INTERLINEAR_OLLAMA_URL", "http://localhost:11434/v1")
+LMSTUDIO_URL = os.environ.get("INTERLINEAR_LMSTUDIO_URL", "http://localhost:1234/v1")
 
 # --------------------------------------------------------------------------
 # Dialeto OpenAI
@@ -109,7 +115,7 @@ class OpenAICompatProvider(Provider):
 class OllamaProvider(OpenAICompatProvider):
     """Ollama local. Completa pelo endpoint compatível, lista pelo nativo."""
 
-    default_base_url = "http://localhost:11434/v1"
+    default_base_url = OLLAMA_URL
 
     async def list_models(self, *, client: httpx.AsyncClient) -> list[str]:
         root = self.base_url.removesuffix("/v1")
@@ -125,7 +131,7 @@ class OllamaProvider(OpenAICompatProvider):
 class LMStudioProvider(OpenAICompatProvider):
     """LM Studio expõe o servidor local em /v1 sem exigir chave."""
 
-    default_base_url = "http://localhost:1234/v1"
+    default_base_url = LMSTUDIO_URL
 
 
 # --------------------------------------------------------------------------
@@ -353,14 +359,14 @@ PROVIDER_CATALOG = [
         "kind": "lmstudio",
         "label": "LM Studio (local)",
         "needs_key": False,
-        "default_base_url": "http://localhost:1234/v1",
+        "default_base_url": LMSTUDIO_URL,
         "hint": "Ligue o servidor local na aba Developer do LM Studio.",
     },
     {
         "kind": "ollama",
         "label": "Ollama (local)",
         "needs_key": False,
-        "default_base_url": "http://localhost:11434/v1",
+        "default_base_url": OLLAMA_URL,
         "hint": "Precisa do Ollama rodando na máquina.",
     },
 ]

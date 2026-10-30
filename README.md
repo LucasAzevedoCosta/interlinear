@@ -97,17 +97,39 @@ Baggins = Bolseiro
 O glossário é injetado em todo lote enviado ao modelo, que é o que mantém nomes
 e termos iguais do começo ao fim do livro.
 
+## Rodando com Docker
+
+```bash
+docker compose up -d --build
+```
+
+Abra `http://127.0.0.1:8000`. A porta é publicada só em `127.0.0.1`, como na
+execução direta.
+
+- **Dados:** projetos e preferências ficam no volume `interlinear-data`
+  (montado em `/data`), e sobrevivem a rebuilds. `docker compose down -v`
+  apaga tudo.
+- **Chaves:** crie um arquivo `.env` ao lado do `compose.yaml` com
+  `INTERLINEAR_OPENAI_KEY=...` e afins. O `.env` está no `.gitignore`.
+- **IA local:** o container alcança Ollama e LM Studio do seu computador por
+  `host.docker.internal`, já configurado. O LM Studio precisa estar servindo
+  na rede (opção *Serve on Local Network*), não só em `localhost`.
+- **Logs:** `docker compose logs -f`
+
 ## Variáveis de ambiente
 
-| Variável             | Para quê                                           |
-| -------------------- | -------------------------------------------------- |
-| `INTERLINEAR_DATA_DIR`     | Onde ficam projetos e preferências                 |
-| `INTERLINEAR_HOST`         | Endereço de escuta (padrão `127.0.0.1`)            |
-| `INTERLINEAR_PORT`         | Porta (padrão `8000`)                              |
-| `INTERLINEAR_OPENAI_KEY`   | Chave da OpenAI, tem prioridade sobre a salva       |
-| `INTERLINEAR_ANTHROPIC_KEY`| Idem, Anthropic                                     |
-| `INTERLINEAR_GOOGLE_KEY`   | Idem, Google                                        |
-| `INTERLINEAR_LOG_LEVEL`    | `DEBUG` para ver o que o extrator decidiu           |
+| Variável                    | Para quê                                          |
+| --------------------------- | ------------------------------------------------- |
+| `INTERLINEAR_DATA_DIR`      | Onde ficam projetos e preferências                |
+| `INTERLINEAR_HOST`          | Endereço de escuta (padrão `127.0.0.1`)           |
+| `INTERLINEAR_PORT`          | Porta (padrão `8000`)                             |
+| `INTERLINEAR_OPENAI_KEY`    | Chave da OpenAI, tem prioridade sobre a salva     |
+| `INTERLINEAR_ANTHROPIC_KEY` | Idem, Anthropic                                   |
+| `INTERLINEAR_GOOGLE_KEY`    | Idem, Google                                      |
+| `INTERLINEAR_COMPAT_KEY`    | Idem, endpoint compatível (OpenRouter etc.)       |
+| `INTERLINEAR_OLLAMA_URL`    | Endereço padrão do Ollama                         |
+| `INTERLINEAR_LMSTUDIO_URL`  | Endereço padrão do LM Studio                      |
+| `INTERLINEAR_LOG_LEVEL`     | `DEBUG` para ver o que o extrator decidiu         |
 
 Usar as variáveis de ambiente evita gravar chave nenhuma em disco.
 

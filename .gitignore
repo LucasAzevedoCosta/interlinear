@@ -1,5 +1,6 @@
 # Chaves de API e dados de projeto nunca entram no repositório.
 settings.json
+.env
 *.epub
 !tests/fixtures/*.epub
 data/

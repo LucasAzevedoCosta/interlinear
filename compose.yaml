@@ -1,0 +1,29 @@
+name: interlinear
+
+services:
+  interlinear:
+    build: .
+    image: interlinear:latest
+    container_name: interlinear
+    restart: unless-stopped
+    ports:
+      # Só a sua máquina acessa. Troque por "8000:8000" para expor na rede local.
+      - "127.0.0.1:${INTERLINEAR_PORT:-8000}:8000"
+    environment:
+      INTERLINEAR_LOG_LEVEL: ${INTERLINEAR_LOG_LEVEL:-INFO}
+      # Ollama e LM Studio rodando no host, fora do container.
+      INTERLINEAR_OLLAMA_URL: http://host.docker.internal:11434/v1
+      INTERLINEAR_LMSTUDIO_URL: http://host.docker.internal:1234/v1
+      # Chaves opcionais: definidas aqui, não precisam ser gravadas em disco.
+      INTERLINEAR_OPENAI_KEY: ${INTERLINEAR_OPENAI_KEY:-}
+      INTERLINEAR_ANTHROPIC_KEY: ${INTERLINEAR_ANTHROPIC_KEY:-}
+      INTERLINEAR_GOOGLE_KEY: ${INTERLINEAR_GOOGLE_KEY:-}
+      INTERLINEAR_COMPAT_KEY: ${INTERLINEAR_COMPAT_KEY:-}
+    extra_hosts:
+      # No Docker Desktop já existe; no Linux precisa deste mapeamento.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - interlinear-data:/data
+
+volumes:
+  interlinear-data:
