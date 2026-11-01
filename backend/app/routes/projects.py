@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import tempfile
 from pathlib import Path
@@ -50,39 +51,47 @@ async def create_project(
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, "Arquivo acima do limite de 200 MB")
 
+    # Extrair um PDF leva de segundos a minutos de CPU. Fora do loop de eventos,
+    # para que traduções em andamento e o resto da interface continuem respondendo.
+    try:
+        document = await asyncio.to_thread(
+            _read_source, data, suffix, filename, title, split_on
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - arquivos de terceiros
+        log.exception("Falha ao importar %s", filename)
+        raise HTTPException(500, f"Não foi possível ler o arquivo: {exc}") from exc
+
+    meta = await asyncio.to_thread(
+        store.create,
+        document,
+        source_kind=suffix.lstrip("."),
+        source_filename=filename,
+        source_bytes=data,
+    )
+    return {"project": meta.to_dict()}
+
+
+def _read_source(
+    data: bytes, suffix: str, filename: str, title: str, split_on: str
+) -> Document:
     # Os extratores trabalham com caminho em disco, não com bytes.
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as temporary:
         temporary.write(data)
         temporary.flush()
 
-        try:
-            if suffix == ".pdf":
-                from ..core.structure import split_into_chapters
+        if suffix == ".pdf":
+            from ..core.structure import split_into_chapters
 
-                blocks, guessed_title = extract_blocks(
-                    temporary.name, source_name=filename
-                )
-                document = Document(title=title or guessed_title)
-                document.chapters = split_into_chapters(blocks, split_on=split_on)
-                source_kind = "pdf"
-            else:
-                document = read_epub(temporary.name)
-                if title:
-                    document.title = title
-                source_kind = "epub"
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
-        except Exception as exc:  # noqa: BLE001 - arquivos de terceiros
-            log.exception("Falha ao importar %s", filename)
-            raise HTTPException(500, f"Não foi possível ler o arquivo: {exc}") from exc
-
-    meta = store.create(
-        document,
-        source_kind=source_kind,
-        source_filename=filename,
-        source_bytes=data,
-    )
-    return {"project": meta.to_dict()}
+            blocks, guessed_title = extract_blocks(temporary.name, source_name=filename)
+            document = Document(title=title or guessed_title)
+            document.chapters = split_into_chapters(blocks, split_on=split_on)
+        else:
+            document = read_epub(temporary.name)
+            if title:
+                document.title = title
+    return document
 
 
 # --------------------------------------------------------------------------
@@ -92,13 +101,14 @@ async def create_project(
 
 @router.get("")
 async def list_projects() -> dict[str, Any]:
-    return {"projects": [m.to_dict() for m in get_store().list_projects()]}
+    projects = await asyncio.to_thread(get_store().list_projects)
+    return {"projects": [m.to_dict() for m in projects]}
 
 
 @router.get("/{project_id}")
 async def get_project(project_id: str) -> dict[str, Any]:
     store = get_store()
-    document = _load(store, project_id)
+    document = await _load(store, project_id)
     meta = store.get_meta(project_id)
     return {
         "project": meta.to_dict() if meta else None,
@@ -108,7 +118,7 @@ async def get_project(project_id: str) -> dict[str, Any]:
 
 @router.get("/{project_id}/chapters/{chapter_id}")
 async def get_chapter(project_id: str, chapter_id: str) -> dict[str, Any]:
-    document = _load(get_store(), project_id)
+    document = await _load(get_store(), project_id)
     chapter = _find_chapter(document, chapter_id)
     return {"chapter": chapter.to_dict()}
 
@@ -159,7 +169,7 @@ async def update_blocks(
             changed += 1
         return changed
 
-    changed = _update(store, project_id, change)
+    changed = await _update(store, project_id, change)
     meta = store.get_meta(project_id)
     return {"updated": changed, "project": meta.to_dict() if meta else None}
 
@@ -181,7 +191,7 @@ async def update_chapter_titles(
                 changed += 1
         return changed
 
-    return {"updated": _update(get_store(), project_id, change)}
+    return {"updated": await _update(get_store(), project_id, change)}
 
 
 @router.patch("/{project_id}")
@@ -196,7 +206,7 @@ async def update_metadata(
             if field_name in payload and payload[field_name] is not None:
                 setattr(document, field_name, str(payload[field_name]))
 
-    _update(store, project_id, change)
+    await _update(store, project_id, change)
     meta = store.get_meta(project_id)
     return {"project": meta.to_dict() if meta else None}
 
@@ -231,7 +241,7 @@ async def split_chapter(
         document.chapters.insert(chapter_position + 1, new_chapter)
         return document.to_dict()
 
-    return {"document": _update(get_store(), project_id, change)}
+    return {"document": await _update(get_store(), project_id, change)}
 
 
 @router.post("/{project_id}/chapters/{chapter_id}/merge")
@@ -247,12 +257,12 @@ async def merge_chapter(project_id: str, chapter_id: str) -> dict[str, Any]:
         document.chapters.pop(position)
         return document.to_dict()
 
-    return {"document": _update(get_store(), project_id, change)}
+    return {"document": await _update(get_store(), project_id, change)}
 
 
 @router.delete("/{project_id}")
 async def delete_project(project_id: str) -> dict[str, Any]:
-    if not get_store().delete(project_id):
+    if not await asyncio.to_thread(get_store().delete, project_id):
         raise HTTPException(404, "Projeto não encontrado")
     return {"deleted": True}
 
@@ -273,7 +283,7 @@ async def preview_chapter(
     O preview usa o mesmo gerador de XHTML da exportação, então o que se vê
     aqui é o que vai para o arquivo final — não uma aproximação.
     """
-    document = _load(get_store(), project_id)
+    document = await _load(get_store(), project_id)
     chapter = _find_chapter(document, chapter_id)
 
     language = document.language if translated else document.source_language
@@ -309,7 +319,7 @@ async def export_epub(
 ) -> FileResponse:
     """Gera e devolve o EPUB final."""
     store = get_store()
-    document = _load(store, project_id)
+    document = await _load(store, project_id)
 
     suffix = "traduzido" if translated else "original"
     safe_title = "".join(
@@ -317,7 +327,7 @@ async def export_epub(
     ).strip() or "livro"
     output = store.project_dir(project_id) / f"{safe_title} ({suffix}).epub"
 
-    write_epub(document, output, use_translation=translated)
+    await asyncio.to_thread(write_epub, document, output, use_translation=translated)
 
     return FileResponse(
         output,
@@ -329,19 +339,23 @@ async def export_epub(
 # --------------------------------------------------------------------------
 
 
-def _load(store: ProjectStore, project_id: str) -> Document:
+# Ler e gravar o JSON de um livro grande leva tempo; as duas funções rodam numa
+# thread para não segurar o loop de eventos.
+
+
+async def _load(store: ProjectStore, project_id: str) -> Document:
     try:
-        return store.load_document(project_id)
+        return await asyncio.to_thread(store.load_document, project_id)
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(404, "Projeto não encontrado") from exc
 
 
-def _update(
+async def _update(
     store: ProjectStore, project_id: str, change: Callable[[Document], T]
 ) -> T:
     """store.update com o 404 das rotas. Um HTTPException em `change` cancela a gravação."""
     try:
-        return store.update(project_id, change)
+        return await asyncio.to_thread(store.update, project_id, change)
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(404, "Projeto não encontrado") from exc
 

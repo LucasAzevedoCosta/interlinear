@@ -200,7 +200,7 @@ async def start_translation(
     settings = get_settings_store().load()
 
     try:
-        document = project_store.load_document(project_id)
+        document = await asyncio.to_thread(project_store.load_document, project_id)
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(404, "Projeto não encontrado") from exc
 
