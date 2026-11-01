@@ -1,5 +1,7 @@
 # Interlinear
 
+[![CI](https://github.com/LucasAzevedoCosta/interlinear/actions/workflows/ci.yml/badge.svg)](https://github.com/LucasAzevedoCosta/interlinear/actions/workflows/ci.yml)
+
 Converte PDF em EPUB, deixa você editar o resultado com prévia ao vivo e traduz
 o livro inteiro usando o modelo de IA que você escolher — na nuvem ou rodando
 na sua própria máquina.

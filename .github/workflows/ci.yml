@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  testes:
+    name: Testes (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 é o mínimo do pyproject.toml; 3.12 é a versão da imagem Docker.
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Instala dependências
+        run: pip install -r requirements-dev.txt
+
+      - name: Roda os testes
+        run: pytest -q
+
+  docker:
+    name: Imagem Docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Constrói a imagem
+        run: docker build -t interlinear:ci .
+
+      - name: Sobe o container e confere o health
+        run: |
+          docker run -d --name interlinear -p 127.0.0.1:8000:8000 interlinear:ci
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8000/api/health; then
+              echo
+              curl -sf -o /dev/null http://127.0.0.1:8000/ && echo "interface ok"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs interlinear
+          exit 1
