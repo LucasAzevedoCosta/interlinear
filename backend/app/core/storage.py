@@ -150,7 +150,13 @@ class ProjectStore:
 
     # -- leitura ----------------------------------------------------------
 
-    def load_document(self, project_id: str) -> Document:
+    def load_document(self, project_id: str, *, with_images: bool = False) -> Document:
+        """Carrega o documento. As imagens só vêm com with_images=True.
+
+        Só a exportação precisa dos bytes das imagens; a prévia as serve direto
+        da pasta. Ler tudo a cada salvamento automático pesava em livros
+        ilustrados.
+        """
         path = self._doc_path(project_id)
         if not path.exists():
             raise FileNotFoundError(f"Projeto não encontrado: {project_id}")
@@ -158,7 +164,7 @@ class ProjectStore:
         document = Document.from_dict(json.loads(path.read_text("utf-8")))
 
         images_dir = self.images_dir(project_id)
-        if images_dir.exists():
+        if with_images and images_dir.exists():
             for image in images_dir.iterdir():
                 if image.is_file():
                     document.images[image.name] = image.read_bytes()

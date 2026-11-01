@@ -326,7 +326,7 @@ async def export_epub(
 ) -> FileResponse:
     """Gera e devolve o EPUB final."""
     store = get_store()
-    document = await _load(store, project_id)
+    document = await _load(store, project_id, with_images=True)
 
     suffix = "traduzido" if translated else "original"
     safe_title = "".join(
@@ -350,9 +350,13 @@ async def export_epub(
 # thread para não segurar o loop de eventos.
 
 
-async def _load(store: ProjectStore, project_id: str) -> Document:
+async def _load(
+    store: ProjectStore, project_id: str, *, with_images: bool = False
+) -> Document:
     try:
-        return await asyncio.to_thread(store.load_document, project_id)
+        return await asyncio.to_thread(
+            store.load_document, project_id, with_images=with_images
+        )
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(404, "Projeto não encontrado") from exc
 

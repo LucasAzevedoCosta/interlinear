@@ -57,6 +57,47 @@ def test_importa_pdf_e_exporta_epub(client, pdf_bytes):
         assert archive.read("mimetype") == b"application/epub+zip"
 
 
+def test_imagens_so_sao_lidas_na_exportacao(client, monkeypatch):
+    from app.core.blocks import Chapter, Document
+    from app.deps import get_store
+
+    store = get_store()
+    document = Document(
+        title="Ilustrado",
+        chapters=[Chapter(title="Um", blocks=[
+            Block(kind="paragraph", text="Texto."),
+            Block(kind="image", src="figura.png"),
+        ])],
+    )
+    document.images["figura.png"] = b"\x89PNG-falso"
+    project_id = store.create(document, source_kind="epub", source_filename="x.epub").id
+    block_id = document.chapters[0].blocks[0].id
+
+    lidas: list[str] = []
+    original = Path.read_bytes
+
+    def espiao(self):
+        if self.parent.name == "images":
+            lidas.append(self.name)
+        return original(self)
+
+    monkeypatch.setattr(Path, "read_bytes", espiao)
+
+    # Salvamento automático, abrir o projeto e a prévia não tocam nas imagens.
+    client.patch(
+        f"/api/projects/{project_id}/blocks",
+        json={"updates": [{"id": block_id, "translated": "Texto traduzido."}]},
+    ).raise_for_status()
+    client.get(f"/api/projects/{project_id}").raise_for_status()
+    assert lidas == []
+
+    # A exportação precisa delas, e elas continuam no EPUB depois das edições.
+    exported = client.get(f"/api/projects/{project_id}/export")
+    assert lidas == ["figura.png"]
+    with zipfile.ZipFile(BytesIO(exported.content)) as archive:
+        assert archive.read("OEBPS/images/figura.png") == b"\x89PNG-falso"
+
+
 def test_extensao_invalida_e_recusada(client):
     response = client.post("/api/projects", files={"file": ("x.txt", b"oi", "text/plain")})
     assert response.status_code == 400
