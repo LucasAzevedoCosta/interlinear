@@ -119,10 +119,12 @@ if FRONTEND_DIR.exists():
         return FileResponse(FRONTEND_DIR / "index.html")
 
     app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
+else:
+    log.warning("Interface não encontrada em %s; servindo só a API", FRONTEND_DIR)
 
 
 def run() -> None:
-    """Sobe o servidor e abre o navegador. Chamado por `interlinear` ou `python -m`."""
+    """Sobe o servidor e abre o navegador. Chamado por `python -m app.main` em backend/."""
     import uvicorn
 
     host = os.environ.get("INTERLINEAR_HOST", "127.0.0.1")

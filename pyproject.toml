@@ -19,18 +19,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "reportlab>=4.0"]
 
-[project.scripts]
-interlinear = "app.main:run"
-
-[build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools]
-package-dir = { "" = "backend" }
-
-[tool.setuptools.packages.find]
-where = ["backend"]
+# Sem [build-system] de propósito: o Interlinear não é instalado com pip. O
+# backend serve a pasta frontend/ ao lado dele, que um pacote instalado não
+# levaria. Para rodar, use o Docker (compose.yaml) ou o run.sh.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
