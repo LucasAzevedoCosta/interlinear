@@ -34,6 +34,12 @@ class Job:
     def request_stop(self) -> None:
         self._stop_requested = True
 
+    def cancel(self) -> None:
+        """Para já, sem esperar os lotes em andamento. Para quando o projeto some."""
+        self.request_stop()
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+
     @property
     def should_stop(self) -> bool:
         return self._stop_requested

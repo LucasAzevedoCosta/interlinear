@@ -17,6 +17,7 @@ from ..core.epub_write import DEFAULT_CSS, chapter_to_xhtml, write_epub
 from ..core.pdf_extract import extract_blocks
 from ..core.storage import ProjectStore
 from ..deps import get_store
+from ..jobs import registry
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -262,6 +263,12 @@ async def merge_chapter(project_id: str, chapter_id: str) -> dict[str, Any]:
 
 @router.delete("/{project_id}")
 async def delete_project(project_id: str) -> dict[str, Any]:
+    # Uma tradução em andamento continuaria pagando por lotes que não têm mais
+    # onde ser gravados.
+    job = registry.for_project(project_id)
+    if job is not None and job.status == "running":
+        job.cancel()
+
     if not await asyncio.to_thread(get_store().delete, project_id):
         raise HTTPException(404, "Projeto não encontrado")
     return {"deleted": True}

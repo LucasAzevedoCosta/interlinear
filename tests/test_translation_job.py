@@ -144,9 +144,13 @@ def test_apagar_projeto_durante_a_traducao_nao_recria_a_pasta(client, provider):
 
     client.delete(f"/api/projects/{project_id}").raise_for_status()
     provider.gate.set()
-    _wait_job(client, job_id)
+    job = _wait_job(client, job_id)
 
     assert not get_store().project_dir(project_id).exists()
+    # A tarefa foi cancelada no DELETE: nenhum lote além do que estava no portão.
+    assert job["status"] == "stopped"
+    time.sleep(0.1)
+    assert provider.calls == 1
 
 
 def test_chave_invalida_interrompe_e_marca_erro(client, provider):

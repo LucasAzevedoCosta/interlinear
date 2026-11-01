@@ -185,11 +185,14 @@ class ProjectStore:
         return sorted(projects, key=lambda m: m.updated_at, reverse=True)
 
     def delete(self, project_id: str) -> bool:
-        directory = self.project_dir(project_id)
-        if not directory.exists():
-            return False
-        shutil.rmtree(directory)
-        return True
+        # Sob a trava: uma gravação em andamento termina antes, e a seguinte
+        # encontra o projeto já apagado (FileNotFoundError em update).
+        with _lock_for(project_id):
+            directory = self.project_dir(project_id)
+            if not directory.exists():
+                return False
+            shutil.rmtree(directory)
+            return True
 
 
 # --------------------------------------------------------------------------
