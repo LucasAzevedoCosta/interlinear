@@ -7,10 +7,12 @@ services:
     container_name: interlinear
     restart: unless-stopped
     ports:
-      # Só a sua máquina acessa. Troque por "8000:8000" para expor na rede local.
+      # Só a sua máquina acessa. Para expor na rede local, troque por
+      # "8000:8000" e liste o IP ou nome da máquina em INTERLINEAR_ALLOWED_HOSTS.
       - "127.0.0.1:${INTERLINEAR_PORT:-8000}:8000"
     environment:
       INTERLINEAR_LOG_LEVEL: ${INTERLINEAR_LOG_LEVEL:-INFO}
+      INTERLINEAR_ALLOWED_HOSTS: ${INTERLINEAR_ALLOWED_HOSTS:-}
       # Ollama e LM Studio rodando no host, fora do container.
       INTERLINEAR_OLLAMA_URL: http://host.docker.internal:11434/v1
       INTERLINEAR_LMSTUDIO_URL: http://host.docker.internal:1234/v1

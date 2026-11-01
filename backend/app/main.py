@@ -14,8 +14,9 @@ import os
 import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -50,6 +51,47 @@ app = FastAPI(
 
 app.include_router(projects.router)
 app.include_router(ai.router)
+
+
+# Escutar só em 127.0.0.1 não basta: um site aberto no navegador alcança a API
+# por DNS rebinding (o domínio dele passa a apontar para 127.0.0.1) ou mandando
+# formulários direto para cá. O Host denuncia o primeiro caso, o Origin o segundo.
+def _allowed_hosts() -> set[str]:
+    extra = os.environ.get("INTERLINEAR_ALLOWED_HOSTS", "")
+    return {"127.0.0.1", "localhost", "::1"} | {
+        host.strip().lower() for host in extra.split(",") if host.strip()
+    }
+
+
+ALLOWED_HOSTS = _allowed_hosts()
+_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def _hostname(value: str) -> str:
+    """Nome do host sem porta e sem colchetes, de um Host ou de uma URL."""
+    if "//" not in value:
+        value = f"//{value}"
+    try:
+        return (urlsplit(value).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+@app.middleware("http")
+async def local_only(request: Request, call_next):
+    if "*" not in ALLOWED_HOSTS:
+        if _hostname(request.headers.get("host", "")) not in ALLOWED_HOSTS:
+            return JSONResponse(status_code=400, content={"detail": "Host não permitido"})
+
+        origin = request.headers.get("origin")
+        if (
+            origin
+            and request.method not in _SAFE_METHODS
+            and _hostname(origin) not in ALLOWED_HOSTS
+        ):
+            return JSONResponse(status_code=403, content={"detail": "Origem não permitida"})
+
+    return await call_next(request)
 
 
 @app.get("/api/health")

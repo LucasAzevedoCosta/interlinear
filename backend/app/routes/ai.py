@@ -91,7 +91,15 @@ async def upsert_provider(payload: dict[str, Any] = Body(...)) -> dict[str, Any]
     existing = next((p for p in settings.providers if p.id == profile_id), None)
 
     api_key = str(payload.get("api_key") or "")
+    base_url = str(payload.get("base_url") or "")
     if not api_key and existing:
+        # Manter a chave só faz sentido se ela continuar indo para o mesmo
+        # lugar. Trocar o endereço sem redigitar a chave seria o jeito de
+        # desviá-la para outro servidor.
+        if existing.api_key and base_url.rstrip("/") != existing.base_url.rstrip("/"):
+            raise HTTPException(
+                400, "Ao trocar o endereço do provedor, digite a chave de novo"
+            )
         api_key = existing.api_key
 
     profile = ProviderProfile(
@@ -99,7 +107,7 @@ async def upsert_provider(payload: dict[str, Any] = Body(...)) -> dict[str, Any]
         label=str(payload.get("label") or kind),
         kind=kind,
         model=str(payload.get("model") or ""),
-        base_url=str(payload.get("base_url") or ""),
+        base_url=base_url,
         api_key=api_key,
         temperature=float(payload.get("temperature", 0.2)),
         max_tokens=int(payload.get("max_tokens", 4096)),

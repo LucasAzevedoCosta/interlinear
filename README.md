@@ -123,6 +123,7 @@ execução direta.
 | `INTERLINEAR_DATA_DIR`      | Onde ficam projetos e preferências                |
 | `INTERLINEAR_HOST`          | Endereço de escuta (padrão `127.0.0.1`)           |
 | `INTERLINEAR_PORT`          | Porta (padrão `8000`)                             |
+| `INTERLINEAR_ALLOWED_HOSTS` | Nomes extras aceitos no `Host`, separados por vírgula (`*` desliga a checagem) |
 | `INTERLINEAR_OPENAI_KEY`    | Chave da OpenAI, tem prioridade sobre a salva     |
 | `INTERLINEAR_ANTHROPIC_KEY` | Idem, Anthropic                                   |
 | `INTERLINEAR_GOOGLE_KEY`    | Idem, Google                                      |

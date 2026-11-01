@@ -65,7 +65,7 @@ def client(tmp_path, monkeypatch):
     reset_caches()
     from app.main import app
 
-    with TestClient(app) as test_client:
+    with TestClient(app, base_url="http://127.0.0.1") as test_client:
         yield test_client
     reset_caches()
 
