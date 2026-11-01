@@ -1,0 +1,153 @@
+"""Testes da tarefa de tradução em segundo plano, com um provedor falso.
+
+O provedor não sai para a rede: devolve "[pt] <texto>" para cada segmento e
+pode ser segurado por um portão, para que o teste consiga editar o projeto
+enquanto a tradução está no meio do caminho.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import re
+import sys
+import threading
+import time
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "backend"))
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app.ai.base import Completion, Provider, ProviderConfig, Usage  # noqa: E402
+from app.config import ProviderProfile  # noqa: E402
+from app.core.blocks import Block, Chapter, Document  # noqa: E402
+from app.deps import get_store, reset_caches  # noqa: E402
+from app.routes import ai as ai_routes  # noqa: E402
+
+_SEGMENT_RE = re.compile(r"⟦(\d+)⟧\n(.*?)(?=\n\n⟦|\Z)", re.S)
+
+
+class FakeProvider(Provider):
+    def __init__(self) -> None:
+        super().__init__(ProviderConfig(kind="fake", model="fake"))
+        self.gate = threading.Event()
+        self.gate.set()
+        self.calls = 0
+
+    async def complete(self, messages, *, client) -> Completion:
+        self.calls += 1
+        while not self.gate.is_set():
+            await asyncio.sleep(0.01)
+        body = messages[-1].content.split("Segmentos a traduzir:", 1)[-1]
+        reply = "\n\n".join(
+            f"⟦{n}⟧ [pt] {text.strip()}" for n, text in _SEGMENT_RE.findall(body)
+        )
+        return Completion(text=reply, usage=Usage(input_tokens=1, output_tokens=1))
+
+    async def list_models(self, *, client) -> list[str]:
+        return ["fake"]
+
+
+@pytest.fixture
+def provider(monkeypatch) -> FakeProvider:
+    fake = FakeProvider()
+    profile = ProviderProfile(id="fake", label="Falso", kind="fake", model="fake")
+    monkeypatch.setattr(ai_routes, "_resolve_provider", lambda *_: (fake, profile))
+    return fake
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    monkeypatch.setenv("INTERLINEAR_DATA_DIR", str(tmp_path))
+    reset_caches()
+    from app.main import app
+
+    with TestClient(app) as test_client:
+        yield test_client
+    reset_caches()
+
+
+def _new_project() -> tuple[str, list[str]]:
+    blocks = [Block(kind="paragraph", text=f"Paragraph {i}.") for i in range(1, 5)]
+    document = Document(title="Original", chapters=[Chapter(title="Um", blocks=blocks)])
+    meta = get_store().create(document, source_kind="epub", source_filename="x.epub")
+    return meta.id, [b.id for b in blocks]
+
+
+def _wait_job(client: TestClient, job_id: str, timeout: float = 5.0) -> dict:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        job = client.get(f"/api/jobs/{job_id}").json()["job"]
+        if job["status"] != "running":
+            return job
+        time.sleep(0.02)
+    raise AssertionError("A tarefa não terminou a tempo")
+
+
+def _start(client: TestClient, project_id: str) -> str:
+    response = client.post(
+        f"/api/projects/{project_id}/translate",
+        json={"batch_chars": 1, "concurrency": 1},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["job"]["id"]
+
+
+def test_edicoes_durante_a_traducao_sobrevivem(client, provider):
+    project_id, ids = _new_project()
+    provider.gate.clear()
+    job_id = _start(client, project_id)
+
+    # Com a tradução parada no portão, o usuário edita de tudo um pouco.
+    client.patch(
+        f"/api/projects/{project_id}/blocks",
+        json={"updates": [{"id": ids[0], "translated": "Minha versão."}]},
+    ).raise_for_status()
+    client.patch(f"/api/projects/{project_id}", json={"title": "Renomeado"}).raise_for_status()
+    chapter_id = client.get(f"/api/projects/{project_id}").json()["document"]["chapters"][0]["id"]
+    client.post(
+        f"/api/projects/{project_id}/chapters/{chapter_id}/split",
+        json={"block_id": ids[2]},
+    ).raise_for_status()
+
+    provider.gate.set()
+    assert _wait_job(client, job_id)["status"] == "done"
+
+    document = get_store().load_document(project_id)
+    blocks = document.block_index()
+    assert document.title == "Renomeado"
+    assert len(document.chapters) == 2
+    assert blocks[ids[0]].translated == "Minha versão."  # a edição vence
+    assert blocks[ids[1]].translated == "[pt] Paragraph 2."
+    assert blocks[ids[3]].translated == "[pt] Paragraph 4."
+
+
+def test_apagar_projeto_durante_a_traducao_nao_recria_a_pasta(client, provider):
+    project_id, _ = _new_project()
+    provider.gate.clear()
+    job_id = _start(client, project_id)
+
+    client.delete(f"/api/projects/{project_id}").raise_for_status()
+    provider.gate.set()
+    _wait_job(client, job_id)
+
+    assert not get_store().project_dir(project_id).exists()
+
+
+def test_apply_translations_respeita_edicao_feita_depois_de_gravar():
+    block = Block(kind="paragraph", text="Hello.", id="b1")
+    initial = {"b1": None}
+    written: dict[str, str | None] = {}
+
+    on_disk = Document(chapters=[Chapter(title="", blocks=[Block(kind="paragraph", text="Hello.", id="b1")])])
+    block.translated = "Olá."
+    ai_routes._apply_translations(on_disk, [block], initial, written)
+    assert on_disk.block_index()["b1"].translated == "Olá."
+
+    # O usuário revisa a tradução já gravada; a próxima gravação não pode desfazer.
+    on_disk.block_index()["b1"].translated = "Olá!"
+    ai_routes._apply_translations(on_disk, [block], initial, written)
+    assert on_disk.block_index()["b1"].translated == "Olá!"

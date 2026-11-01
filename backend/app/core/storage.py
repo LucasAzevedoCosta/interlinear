@@ -18,18 +18,22 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from .blocks import Document, new_id
 
+T = TypeVar("T")
+
 # Trava por projeto: o tradutor grava progresso enquanto o editor pode salvar.
-_locks: dict[str, threading.Lock] = {}
+# Reentrante porque update() segura a trava e chama save_document(), que também
+# a pede.
+_locks: dict[str, threading.RLock] = {}
 _locks_guard = threading.Lock()
 
 
-def _lock_for(project_id: str) -> threading.Lock:
+def _lock_for(project_id: str) -> threading.RLock:
     with _locks_guard:
-        return _locks.setdefault(project_id, threading.Lock())
+        return _locks.setdefault(project_id, threading.RLock())
 
 
 @dataclass
@@ -126,6 +130,20 @@ class ProjectStore:
                 meta.total_translatable = len(document.translatable_blocks())
                 meta.translated_count = _count_translated(document)
                 _atomic_write_json(self._meta_path(project_id), meta.to_dict())
+
+    def update(self, project_id: str, change: Callable[[Document], T]) -> T:
+        """Lê, aplica `change` e grava, tudo sob a trava do projeto.
+
+        Quem altera o documento deve passar por aqui. Carregar, mexer e chamar
+        save_document() em separado deixa uma janela em que outra gravação (a
+        tradução em segundo plano, por exemplo) é sobrescrita pela cópia velha.
+        Levanta FileNotFoundError se o projeto não existe mais.
+        """
+        with _lock_for(project_id):
+            document = self.load_document(project_id)
+            result = change(document)
+            self.save_document(project_id, document)
+            return result
 
     def _write_meta(self, meta: ProjectMeta) -> None:
         _atomic_write_json(self._meta_path(meta.id), meta.to_dict())

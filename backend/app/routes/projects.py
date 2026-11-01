@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from fastapi import APIRouter, Body, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse, HTMLResponse, Response
@@ -21,6 +21,8 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB
+
+T = TypeVar("T")
 
 
 # --------------------------------------------------------------------------
@@ -129,34 +131,35 @@ async def update_blocks(
     Campos ausentes ficam como estão, o que permite salvar só o que mudou.
     """
     store = get_store()
-    document = _load(store, project_id)
-    index = document.block_index()
 
     updates = payload.get("updates") or []
     if not isinstance(updates, list):
         raise HTTPException(400, "Campo 'updates' deve ser uma lista")
 
-    changed = 0
-    for update in updates:
-        if not isinstance(update, dict):
-            continue
-        block = index.get(str(update.get("id", "")))
-        if block is None:
-            continue
+    def change(document: Document) -> int:
+        index = document.block_index()
+        changed = 0
+        for update in updates:
+            if not isinstance(update, dict):
+                continue
+            block = index.get(str(update.get("id", "")))
+            if block is None:
+                continue
 
-        if "text" in update:
-            block.text = str(update["text"])
-        if "translated" in update:
-            value = update["translated"]
-            block.translated = None if value is None else str(value)
-        if "kind" in update and update["kind"]:
-            block.kind = str(update["kind"])  # type: ignore[assignment]
-        if isinstance(update.get("meta"), dict):
-            # Mesclado, não substituído: o editor manda só o que mudou.
-            block.meta = {**block.meta, **update["meta"]}
-        changed += 1
+            if "text" in update:
+                block.text = str(update["text"])
+            if "translated" in update:
+                value = update["translated"]
+                block.translated = None if value is None else str(value)
+            if "kind" in update and update["kind"]:
+                block.kind = str(update["kind"])  # type: ignore[assignment]
+            if isinstance(update.get("meta"), dict):
+                # Mesclado, não substituído: o editor manda só o que mudou.
+                block.meta = {**block.meta, **update["meta"]}
+            changed += 1
+        return changed
 
-    store.save_document(project_id, document)
+    changed = _update(store, project_id, change)
     meta = store.get_meta(project_id)
     return {"updated": changed, "project": meta.to_dict() if meta else None}
 
@@ -166,21 +169,19 @@ async def update_chapter_titles(
     project_id: str, payload: dict[str, Any] = Body(...)
 ) -> dict[str, Any]:
     """Renomeia capítulos. Espera {"chapters": [{"id": "...", "title": "..."}]}."""
-    store = get_store()
-    document = _load(store, project_id)
-    by_id = {c.id: c for c in document.chapters}
+    def change(document: Document) -> int:
+        by_id = {c.id: c for c in document.chapters}
+        changed = 0
+        for item in payload.get("chapters") or []:
+            if not isinstance(item, dict):
+                continue
+            chapter = by_id.get(str(item.get("id", "")))
+            if chapter is not None and "title" in item:
+                chapter.title = str(item["title"])
+                changed += 1
+        return changed
 
-    changed = 0
-    for item in payload.get("chapters") or []:
-        if not isinstance(item, dict):
-            continue
-        chapter = by_id.get(str(item.get("id", "")))
-        if chapter is not None and "title" in item:
-            chapter.title = str(item["title"])
-            changed += 1
-
-    store.save_document(project_id, document)
-    return {"updated": changed}
+    return {"updated": _update(get_store(), project_id, change)}
 
 
 @router.patch("/{project_id}")
@@ -189,13 +190,13 @@ async def update_metadata(
 ) -> dict[str, Any]:
     """Atualiza título, autor e idiomas do livro."""
     store = get_store()
-    document = _load(store, project_id)
 
-    for field_name in ("title", "author", "language", "source_language"):
-        if field_name in payload and payload[field_name] is not None:
-            setattr(document, field_name, str(payload[field_name]))
+    def change(document: Document) -> None:
+        for field_name in ("title", "author", "language", "source_language"):
+            if field_name in payload and payload[field_name] is not None:
+                setattr(document, field_name, str(payload[field_name]))
 
-    store.save_document(project_id, document)
+    _update(store, project_id, change)
     meta = store.get_meta(project_id)
     return {"project": meta.to_dict() if meta else None}
 
@@ -208,48 +209,45 @@ async def split_chapter(
 
     Útil quando a detecção automática juntou dois capítulos do livro.
     """
-    store = get_store()
-    document = _load(store, project_id)
-    chapter = _find_chapter(document, chapter_id)
     block_id = str(payload.get("block_id", ""))
 
-    position = next(
-        (i for i, b in enumerate(chapter.blocks) if b.id == block_id), None
-    )
-    if position is None or position == 0:
-        raise HTTPException(400, "Bloco inválido para divisão")
+    def change(document: Document) -> dict[str, Any]:
+        chapter = _find_chapter(document, chapter_id)
+        position = next(
+            (i for i, b in enumerate(chapter.blocks) if b.id == block_id), None
+        )
+        if position is None or position == 0:
+            raise HTTPException(400, "Bloco inválido para divisão")
 
-    tail = chapter.blocks[position:]
-    chapter.blocks = chapter.blocks[:position]
+        tail = chapter.blocks[position:]
+        chapter.blocks = chapter.blocks[:position]
 
-    new_title = next(
-        (b.text for b in tail if b.kind.startswith("heading") and b.text), ""
-    )
-    new_chapter = Chapter(title=new_title or "Novo capítulo", blocks=tail)
+        new_title = next(
+            (b.text for b in tail if b.kind.startswith("heading") and b.text), ""
+        )
+        new_chapter = Chapter(title=new_title or "Novo capítulo", blocks=tail)
 
-    chapter_position = document.chapters.index(chapter)
-    document.chapters.insert(chapter_position + 1, new_chapter)
+        chapter_position = document.chapters.index(chapter)
+        document.chapters.insert(chapter_position + 1, new_chapter)
+        return document.to_dict()
 
-    store.save_document(project_id, document)
-    return {"document": document.to_dict()}
+    return {"document": _update(get_store(), project_id, change)}
 
 
 @router.post("/{project_id}/chapters/{chapter_id}/merge")
 async def merge_chapter(project_id: str, chapter_id: str) -> dict[str, Any]:
     """Funde um capítulo com o anterior."""
-    store = get_store()
-    document = _load(store, project_id)
-    chapter = _find_chapter(document, chapter_id)
+    def change(document: Document) -> dict[str, Any]:
+        chapter = _find_chapter(document, chapter_id)
+        position = document.chapters.index(chapter)
+        if position == 0:
+            raise HTTPException(400, "Não há capítulo anterior para fundir")
 
-    position = document.chapters.index(chapter)
-    if position == 0:
-        raise HTTPException(400, "Não há capítulo anterior para fundir")
+        document.chapters[position - 1].blocks.extend(chapter.blocks)
+        document.chapters.pop(position)
+        return document.to_dict()
 
-    document.chapters[position - 1].blocks.extend(chapter.blocks)
-    document.chapters.pop(position)
-
-    store.save_document(project_id, document)
-    return {"document": document.to_dict()}
+    return {"document": _update(get_store(), project_id, change)}
 
 
 @router.delete("/{project_id}")
@@ -334,6 +332,16 @@ async def export_epub(
 def _load(store: ProjectStore, project_id: str) -> Document:
     try:
         return store.load_document(project_id)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(404, "Projeto não encontrado") from exc
+
+
+def _update(
+    store: ProjectStore, project_id: str, change: Callable[[Document], T]
+) -> T:
+    """store.update com o 404 das rotas. Um HTTPException em `change` cancela a gravação."""
+    try:
+        return store.update(project_id, change)
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(404, "Projeto não encontrado") from exc
 

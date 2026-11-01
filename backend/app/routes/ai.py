@@ -14,6 +14,7 @@ from ..ai.base import Message, ProviderConfig, ProviderError
 from ..ai.providers import PROVIDER_CATALOG, build_provider
 from ..ai.translator import Progress, TranslationSettings, Translator
 from ..config import ProviderProfile, Settings
+from ..core.blocks import Block, Document
 from ..deps import get_settings_store, get_store
 from ..jobs import registry
 
@@ -249,6 +250,18 @@ async def start_translation(
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
 
+    # A cópia em `document` só serve para a tradução escrever. Ela nunca é
+    # gravada inteira: o usuário pode editar, dividir capítulos ou renomear o
+    # livro enquanto a tarefa roda, e isso está só no disco.
+    initial = {block.id: block.translated for block in candidates}
+    written: dict[str, str | None] = {}
+
+    def persist() -> None:
+        project_store.update(
+            project_id,
+            lambda current: _apply_translations(current, candidates, initial, written),
+        )
+
     async def run() -> None:
         saved_counter = {"last": 0}
 
@@ -257,9 +270,11 @@ async def start_translation(
             # Grava a cada ~20 blocos para não perder trabalho sem martelar o disco.
             if progress.done - saved_counter["last"] >= 20:
                 saved_counter["last"] = progress.done
-                await asyncio.to_thread(
-                    project_store.save_document, project_id, document
-                )
+                try:
+                    await asyncio.to_thread(persist)
+                except FileNotFoundError:
+                    log.info("Projeto %s apagado durante a tradução", project_id)
+                    job.request_stop()
 
         try:
             async with Translator(provider, translation_settings) as translator:
@@ -284,7 +299,10 @@ async def start_translation(
             import time
 
             job.finished_at = time.time()
-            await asyncio.to_thread(project_store.save_document, project_id, document)
+            try:
+                await asyncio.to_thread(persist)
+            except FileNotFoundError:
+                log.info("Projeto %s apagado durante a tradução", project_id)
 
     job._task = asyncio.create_task(run())
 
@@ -320,6 +338,32 @@ async def stop_job(job_id: str) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------
+
+
+def _apply_translations(
+    document: Document,
+    translated_blocks: list[Block],
+    initial: dict[str, str | None],
+    written: dict[str, str | None],
+) -> None:
+    """Copia para `document` as traduções novas da tarefa, bloco a bloco.
+
+    Um bloco só é tocado se, no disco, ele ainda tem o valor de quando a tarefa
+    começou ou o que a própria tarefa gravou antes. Qualquer outro valor é uma
+    edição do usuário feita durante a tradução, e a edição vence. Blocos que
+    sumiram (capítulo apagado, por exemplo) são ignorados.
+    """
+    on_disk = document.block_index()
+    for block in translated_blocks:
+        if block.translated == initial[block.id]:
+            continue  # a tarefa ainda não traduziu este bloco
+        target = on_disk.get(block.id)
+        if target is None:
+            continue
+        if target.translated not in (initial[block.id], written.get(block.id)):
+            continue
+        target.translated = block.translated
+        written[block.id] = block.translated
 
 
 def _resolve_provider(settings: Settings, provider_id: str | None):

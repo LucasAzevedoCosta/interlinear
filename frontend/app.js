@@ -535,7 +535,9 @@ async function pollJob() {
       toast(`Tradução concluída.${note}`);
     }
 
-    // Recarrega para trazer o texto traduzido.
+    // Recarrega para trazer o texto traduzido. Antes, grava o que ainda está
+    // esperando o salvamento automático, senão a recarga mostra o texto velho.
+    await flushSaves();
     const data = await api(`/api/projects/${state.project.id}`);
     state.project = data.project;
     state.doc = data.document;
