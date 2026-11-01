@@ -21,7 +21,14 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app.ai.base import Completion, Provider, ProviderConfig, Usage  # noqa: E402
+from app.ai.base import (  # noqa: E402
+    Completion,
+    Provider,
+    ProviderConfig,
+    ProviderError,
+    Usage,
+)
+from app.ai.translator import MAX_CONSECUTIVE_FAILURES  # noqa: E402
 from app.config import ProviderProfile  # noqa: E402
 from app.core.blocks import Block, Chapter, Document  # noqa: E402
 from app.deps import get_store, reset_caches  # noqa: E402
@@ -36,11 +43,16 @@ class FakeProvider(Provider):
         self.gate = threading.Event()
         self.gate.set()
         self.calls = 0
+        # A partir desta chamada (contando de 1), lança `error` em vez de responder.
+        self.fail_from: int | None = None
+        self.error = ProviderError("Incorrect API key", status=401)
 
     async def complete(self, messages, *, client) -> Completion:
         self.calls += 1
         while not self.gate.is_set():
             await asyncio.sleep(0.01)
+        if self.fail_from is not None and self.calls >= self.fail_from:
+            raise self.error
         body = messages[-1].content.split("Segmentos a traduzir:", 1)[-1]
         reply = "\n\n".join(
             f"⟦{n}⟧ [pt] {text.strip()}" for n, text in _SEGMENT_RE.findall(body)
@@ -70,8 +82,8 @@ def client(tmp_path, monkeypatch):
     reset_caches()
 
 
-def _new_project() -> tuple[str, list[str]]:
-    blocks = [Block(kind="paragraph", text=f"Paragraph {i}.") for i in range(1, 5)]
+def _new_project(size: int = 4) -> tuple[str, list[str]]:
+    blocks = [Block(kind="paragraph", text=f"Paragraph {i}.") for i in range(1, size + 1)]
     document = Document(title="Original", chapters=[Chapter(title="Um", blocks=blocks)])
     meta = get_store().create(document, source_kind="epub", source_filename="x.epub")
     return meta.id, [b.id for b in blocks]
@@ -135,6 +147,35 @@ def test_apagar_projeto_durante_a_traducao_nao_recria_a_pasta(client, provider):
     _wait_job(client, job_id)
 
     assert not get_store().project_dir(project_id).exists()
+
+
+def test_chave_invalida_interrompe_e_marca_erro(client, provider):
+    project_id, ids = _new_project(size=10)
+    provider.fail_from = 3  # dois lotes passam, o terceiro recebe 401
+
+    job = _wait_job(client, _start(client, project_id))
+
+    assert job["status"] == "error"
+    assert "Incorrect API key" in job["error"]
+    assert provider.calls == 3  # nenhum lote enviado depois do 401
+    blocks = get_store().load_document(project_id).block_index()
+    assert blocks[ids[0]].translated == "[pt] Paragraph 1."  # o já feito fica salvo
+    assert blocks[ids[1]].translated == "[pt] Paragraph 2."
+    assert blocks[ids[2]].translated is None
+
+
+def test_lotes_seguidos_falhando_interrompem(client, provider):
+    project_id, _ = _new_project(size=12)
+    provider.fail_from = 1
+    # 400 não é fatal sozinho (pode ser um trecho problemático), mas em sequência é.
+    provider.error = ProviderError("max_tokens inválido", status=400)
+
+    job = _wait_job(client, _start(client, project_id))
+
+    assert job["status"] == "error"
+    assert "lotes seguidos falharam" in job["error"]
+    assert "max_tokens inválido" in job["error"]
+    assert provider.calls == MAX_CONSECUTIVE_FAILURES
 
 
 def test_apply_translations_respeita_edicao_feita_depois_de_gravar():

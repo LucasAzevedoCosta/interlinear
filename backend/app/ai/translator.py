@@ -75,6 +75,18 @@ class Progress:
 
 ProgressCallback = Callable[[Progress], Awaitable[None] | None]
 
+# Respostas que valem para o livro inteiro: chave inválida, sem permissão,
+# modelo inexistente. Insistir só repete o mesmo erro em cada lote.
+FATAL_STATUSES = frozenset({401, 403, 404})
+
+# Lotes seguidos falhando por qualquer motivo (servidor fora do ar, 400 por
+# parâmetro inválido...) também indicam problema de configuração, não de texto.
+MAX_CONSECUTIVE_FAILURES = 5
+
+
+def is_fatal(exc: ProviderError) -> bool:
+    return not exc.retryable and exc.status in FATAL_STATUSES
+
 
 # --------------------------------------------------------------------------
 # Montagem dos lotes
@@ -272,6 +284,8 @@ class Translator:
                 usage = usage + completion.usage
                 results.append(_clean_single(completion.text))
             except ProviderError as exc:
+                if is_fatal(exc):
+                    raise
                 log.error("Falha ao traduzir bloco %s: %s", block.id, exc)
                 results.append("")
 
@@ -288,6 +302,11 @@ class Translator:
 
         Lotes rodam em paralelo até o limite de concorrência. O progresso é
         reportado conforme cada lote termina, não no fim de tudo.
+
+        Um erro que vale para o livro inteiro (chave, permissão, modelo) ou uma
+        sequência de lotes falhando interrompe tudo: os lotes na fila não são
+        enviados e o ProviderError sobe para quem chamou. O que já foi traduzido
+        fica em block.translated.
         """
         pending = [b for b in blocks if b.text.strip()]
         batches = build_batches(pending, max_chars=self.settings.batch_chars)
@@ -295,13 +314,19 @@ class Translator:
         progress = Progress(total=len(pending))
         semaphore = asyncio.Semaphore(max(1, self.settings.concurrency))
         lock = asyncio.Lock()
+        abort: list[ProviderError] = []
+        consecutive_failures = 0
 
         # Mapa para localizar vizinhos de cada lote e montar o contexto.
         position = {id(block): i for i, block in enumerate(pending)}
         window = self.settings.context_blocks
 
+        def halted() -> bool:
+            return bool(abort) or bool(should_stop and should_stop())
+
         async def run_batch(batch: list[Block]) -> None:
-            if should_stop and should_stop():
+            nonlocal consecutive_failures
+            if halted():
                 return
 
             start = position[id(batch[0])]
@@ -310,7 +335,7 @@ class Translator:
             after = pending[end + 1 : end + 1 + window]
 
             async with semaphore:
-                if should_stop and should_stop():
+                if halted():
                     return
                 try:
                     segments, usage = await self.translate_batch(
@@ -321,6 +346,12 @@ class Translator:
                     async with lock:
                         progress.failed += len(batch)
                         progress.current_note = f"Erro: {exc}"
+                        consecutive_failures += 1
+                        if not abort and (
+                            is_fatal(exc)
+                            or consecutive_failures >= MAX_CONSECUTIVE_FAILURES
+                        ):
+                            abort.append(exc)
                         await _notify(on_progress, progress)
                     return
 
@@ -331,11 +362,22 @@ class Translator:
                         progress.done += 1
                     else:
                         progress.failed += 1
+                consecutive_failures = 0
                 progress.usage = progress.usage + usage
                 progress.current_note = ""
                 await _notify(on_progress, progress)
 
         await asyncio.gather(*(run_batch(batch) for batch in batches))
+
+        if abort:
+            exc = abort[0]
+            if is_fatal(exc):
+                raise exc
+            raise ProviderError(
+                f"{MAX_CONSECUTIVE_FAILURES} lotes seguidos falharam. "
+                f"Último erro: {exc}",
+                status=exc.status,
+            ) from exc
         return progress
 
 
