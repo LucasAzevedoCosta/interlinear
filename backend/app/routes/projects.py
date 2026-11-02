@@ -85,8 +85,11 @@ def _read_source(
         if suffix == ".pdf":
             from ..core.structure import split_into_chapters
 
-            blocks, guessed_title = extract_blocks(temporary.name, source_name=filename)
-            document = Document(title=title or guessed_title)
+            images: dict[str, bytes] = {}
+            blocks, guessed_title = extract_blocks(
+                temporary.name, source_name=filename, images=images
+            )
+            document = Document(title=title or guessed_title, images=images)
             document.chapters = split_into_chapters(blocks, split_on=split_on)
         else:
             document = read_epub(temporary.name)

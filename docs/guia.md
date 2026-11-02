@@ -324,23 +324,20 @@ revisão é só de sentido.
 
 Em ordem de retorno sobre esforço:
 
-1. **Recuperar o itálico na extração.** Rápido, e o que mais melhora o
-   resultado em romance. O extrator já calcula a flag `italic` em
-   `core/pdf_extract.py` mas a descarta; o resto do sistema já suporta `<em>`.
-2. **Corrigir a junção de hífen composto.** Hoje `"guarda-" + "chuva"` vira
+1. **Corrigir a junção de hífen composto.** Hoje `"guarda-" + "chuva"` vira
    `guardachuva`. Dicionário, lista de prefixos ou um modelo pequeno.
-3. **Marcação automática de suspeitos.** Regras triviais (parágrafo começando
+2. **Marcação automática de suspeitos.** Regras triviais (parágrafo começando
    em minúscula, título longo demais, bloco de um caractere) marcadas na
    margem, com um "ir para o próximo suspeito". Transforma horas de revisão em
    minutos.
-4. **IA como árbitro dos suspeitos.** Mesma marcação do item 3, mas roteada
+3. **IA como árbitro dos suspeitos.** Mesma marcação do item 2, mas roteada
    para um modelo pequeno antes de chegar ao humano. Custa centavos.
-5. **Expor os limiares na interface**, para calibrar por livro sem editar
+4. **Expor os limiares na interface**, para calibrar por livro sem editar
    código.
-6. **Extrair imagens do PDF.**
-7. **OCR** para PDFs escaneados.
+5. **OCR** para PDFs escaneados.
 
-Os itens 1 e 2 são bugs conhecidos, não funcionalidades novas.
+O item 1 é bug conhecido, não funcionalidade nova. Itálico e negrito na
+extração e imagens do PDF, que já estiveram nesta lista, estão feitos.
 
 ---
 

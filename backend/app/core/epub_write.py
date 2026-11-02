@@ -77,6 +77,16 @@ img {
   height: auto;
 }
 
+/* Figura centralizada e sem o recuo de parágrafo; o texto depois dela
+   recomeça sem recuo, como depois de um título. */
+p.image {
+  text-indent: 0;
+  text-align: center;
+  margin: 1em 0;
+}
+
+p.image + p { text-indent: 0; }
+
 hr.page-break {
   border: 0;
   page-break-after: always;

@@ -271,6 +271,21 @@ function renderEditor() {
 
 const TEXT_KINDS = new Set(['heading1', 'heading2', 'heading3', 'paragraph', 'quote', 'list_item']);
 
+// Mesma regra do inline_html do backend: escapa tudo e reabilita só as tags de
+// ênfase, para o original mostrar itálico e negrito em vez de "<em>".
+const ALLOWED_INLINE = /&lt;(\/?)(em|strong|i|b|sup|sub|small)&gt;|&lt;br\s*\/?&gt;/gi;
+
+function inlineHtml(text) {
+  const escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+  return escaped.replace(ALLOWED_INLINE, (match, slash, tag) =>
+    tag ? `<${slash}${tag.toLowerCase()}>` : '<br>'
+  );
+}
+
 function autoGrow(field) {
   field.style.height = 'auto';
   field.style.height = `${field.scrollHeight}px`;
@@ -317,7 +332,7 @@ function renderBlock(block, next) {
   } else {
     const source = document.createElement('p');
     source.className = 'block__source';
-    source.textContent = block.text;
+    source.innerHTML = inlineHtml(block.text);
     wrapper.append(source);
   }
 

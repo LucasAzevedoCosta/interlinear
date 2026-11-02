@@ -159,7 +159,9 @@ def _derive_title(blocks: list[Block], index: int) -> str:
         if block.kind.startswith("heading") and block.text.strip():
             return block.text.strip()
     for block in blocks:
-        if block.text.strip():
-            snippet = " ".join(block.text.split()[:7])
+        # Sem <em>/<strong>: o título vai para o sumário e a lista de capítulos.
+        plain = re.sub(r"<[^>]+>", "", block.text)
+        if plain.strip():
+            snippet = " ".join(plain.split()[:7])
             return f"{snippet}…"
     return f"Capítulo {index}"

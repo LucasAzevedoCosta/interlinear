@@ -46,15 +46,6 @@ abordagem.
 
 ### Bugs identificados, ainda não corrigidos
 
-**O itálico é descartado.** O extrator detecta negrito e itálico pelo nome da
-fonte embutida — está na estrutura `Line` em `core/pdf_extract.py` — mas na
-montagem dos blocos só o negrito é usado, para classificar título. O itálico se
-perde. Num romance isso dói: itálico marca pensamento interno, título de obra,
-palavra estrangeira.
-
-O resto do sistema já suporta: `epub_write.inline_html` preserva `<em>` e
-`epub_read` também. Falta só o extrator produzir.
-
 **Junção de hífen erra em palavras compostas.** A regra em
 `blocks.join_hyphenated` é: se a linha termina em hífen e a próxima começa com
 minúscula, junta e remove o hífen.
@@ -118,9 +109,19 @@ vira um capítulo único. Existe um fallback em `structure.split_into_chapters`
 que desce de `heading1` para `heading2` e `heading3`, mas se não há título de
 nível nenhum, não há o que fazer automaticamente.
 
-**Notas de rodapé, tabelas, imagens.** Notas entram como parágrafos comuns no
-corpo. Tabelas viram parágrafos soltos. Imagens de PDF não são extraídas (as de
-EPUB são preservadas).
+**Notas de rodapé e tabelas.** Notas entram como parágrafos comuns no corpo.
+Tabelas viram parágrafos soltos.
+
+**Imagens só nos formatos comuns.** Fotos em JPEG e bitmaps de 8 bits em RGB ou
+tons de cinza são extraídos e encaixados entre os parágrafos pela posição na
+página. Imagens em CMYK, com paleta, de 1 bit, JPEG 2000 ou JBIG2 são
+ignoradas, assim como ornamentos pequenos (menos de 40 pt) e imagens que se
+repetem em três páginas ou mais (logotipos, molduras).
+
+**Itálico depende do nome da fonte.** Itálico e negrito viram `<em>` e
+`<strong>` a partir do nome da fonte de cada caractere ("Times-Italic",
+"MinionPro-It", "Garamond-BoldIt"). Uma fonte itálica com nome que não diz
+isso passa como texto normal.
 
 **PDF escaneado.** Sem OCR não há texto. O extrator levanta `ValueError` com
 mensagem explícita em vez de produzir um EPUB vazio.
@@ -246,9 +247,9 @@ mudança de cena, salto temporal, encerramento.
 
 Vale ser claro, porque nem todo problema é problema de IA:
 
-- **Itálico perdido** — é bug de código. O modelo não pode recuperar uma
-  informação que não chegou até ele. Conserto: usar a flag `italic` que o
-  extrator já calcula.
+- **Itálico** — era bug de código, já corrigido: o modelo não pode recuperar
+  uma informação que não chegou até ele, então o extrator passou a marcar
+  `<em>` e `<strong>` pela fonte de cada caractere.
 - **Duas colunas** — é problema de geometria, não de linguagem. Resolve-se com
   análise de layout (ou trocando para PyMuPDF), não com prompt.
 - **PDF escaneado** — precisa de OCR. Modelo de texto não lê imagem.
