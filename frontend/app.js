@@ -43,13 +43,26 @@ async function api(path, options = {}) {
   return payload;
 }
 
-function toast(message, tone = 'info') {
+// `action` ({label, onClick}) põe um botão no aviso, como "Desfazer". O aviso
+// fica mais tempo na tela para dar chance de clicar.
+function toast(message, tone = 'info', action = null) {
   const element = $('toast');
   element.textContent = message;
+  if (action) {
+    const button = document.createElement('button');
+    button.className = 'toast__action';
+    button.textContent = action.label;
+    button.onclick = () => {
+      element.hidden = true;
+      action.onClick();
+    };
+    element.append(' ', button);
+  }
   element.dataset.tone = tone;
   element.hidden = false;
   clearTimeout(toast._timer);
-  toast._timer = setTimeout(() => { element.hidden = true; }, tone === 'error' ? 7000 : 3200);
+  const delay = tone === 'error' ? 7000 : action ? 8000 : 3200;
+  toast._timer = setTimeout(() => { element.hidden = true; }, delay);
 }
 
 /* --------------------------------------------------------------- projetos */
@@ -251,14 +264,22 @@ function renderEditor() {
     : 'Capítulo sem texto traduzível.';
   inner.append(note);
 
-  for (const block of chapter.blocks) {
-    inner.append(renderBlock(block));
-  }
+  chapter.blocks.forEach((block, index) => {
+    inner.append(renderBlock(block, chapter.blocks[index + 1]));
+  });
 }
 
-function renderBlock(block) {
+const TEXT_KINDS = new Set(['heading1', 'heading2', 'heading3', 'paragraph', 'quote', 'list_item']);
+
+function autoGrow(field) {
+  field.style.height = 'auto';
+  field.style.height = `${field.scrollHeight}px`;
+}
+
+function renderBlock(block, next) {
   const wrapper = document.createElement('div');
   wrapper.className = 'block';
+  wrapper.dataset.id = block.id;
   wrapper.dataset.kind = block.kind;
   wrapper.dataset.state = blockState(block);
 
@@ -272,14 +293,33 @@ function renderBlock(block) {
     const img = document.createElement('p');
     img.className = 'block__source';
     img.textContent = `[imagem: ${block.src || 'sem arquivo'}]`;
-    wrapper.append(img);
+    wrapper.append(img, renderStructureTools(block, next));
     return wrapper;
   }
 
-  const source = document.createElement('p');
-  source.className = 'block__source';
-  source.textContent = block.text;
-  wrapper.append(source);
+  // O original vem do arquivo e não se edita, exceto num bloco que o próprio
+  // usuário inseriu: ali o original é justamente o que faltou na extração.
+  if (block.meta?.inserted) {
+    const sourceField = document.createElement('textarea');
+    sourceField.className = 'block__source block__source-field';
+    sourceField.rows = 1;
+    sourceField.value = block.text;
+    sourceField.placeholder = 'texto original que faltou';
+    sourceField.setAttribute('aria-label', 'Texto original deste parágrafo');
+    sourceField.oninput = () => {
+      autoGrow(sourceField);
+      block.text = sourceField.value;
+      queueUpdate(block.id, { text: block.text });
+    };
+    sourceField.onblur = () => flushSaves();
+    wrapper.append(sourceField);
+    requestAnimationFrame(() => autoGrow(sourceField));
+  } else {
+    const source = document.createElement('p');
+    source.className = 'block__source';
+    source.textContent = block.text;
+    wrapper.append(source);
+  }
 
   const field = document.createElement('textarea');
   field.className = 'block__field';
@@ -288,10 +328,7 @@ function renderBlock(block) {
   field.placeholder = 'ainda não traduzido';
   field.setAttribute('aria-label', 'Tradução deste parágrafo');
 
-  const grow = () => {
-    field.style.height = 'auto';
-    field.style.height = `${field.scrollHeight}px`;
-  };
+  const grow = () => autoGrow(field);
 
   field.oninput = () => {
     grow();
@@ -334,20 +371,68 @@ function renderBlock(block) {
   split.textContent = 'Começar capítulo aqui';
   split.onclick = () => splitHere(block.id);
 
-  tools.append(copy, clear, split);
+  tools.append(copy, clear, split, ...renderStructureTools(block, next).children);
   wrapper.append(tools);
 
   return wrapper;
 }
 
+// Juntar, inserir e apagar: os consertos de estrutura. Vale para imagens também
+// (apagar uma figura solta, inserir texto depois dela).
+function renderStructureTools(block, next) {
+  const tools = document.createElement('div');
+  tools.className = 'block__tools';
+
+  if (TEXT_KINDS.has(block.kind) && next?.kind === block.kind) {
+    const merge = document.createElement('button');
+    merge.className = 'block__tool';
+    merge.textContent = 'Juntar com o próximo';
+    merge.title = 'Para parágrafos que a conversão partiu em dois';
+    merge.onclick = () => mergeWithNext(block);
+    tools.append(merge);
+  }
+
+  const insert = document.createElement('button');
+  insert.className = 'block__tool';
+  insert.textContent = 'Inserir abaixo';
+  insert.title = 'Novo parágrafo para um trecho que faltou na conversão';
+  insert.onclick = () => insertBelow(block);
+  tools.append(insert);
+
+  // Apagar pede um segundo clique em 3 s, e o aviso ainda oferece desfazer.
+  const remove = document.createElement('button');
+  remove.className = 'block__tool block__tool--danger';
+  remove.textContent = 'Apagar';
+  remove.onclick = () => {
+    if (remove.dataset.armed) {
+      deleteBlock(block);
+      return;
+    }
+    remove.dataset.armed = '1';
+    remove.textContent = 'Clique de novo para apagar';
+    setTimeout(() => {
+      delete remove.dataset.armed;
+      remove.textContent = 'Apagar';
+    }, 3000);
+  };
+  tools.append(remove);
+
+  return tools;
+}
+
 /* ------------------------------------------------------------ salvamento */
 
 function markDirty(block, clearing = false) {
-  state.dirty.set(block.id, {
-    id: block.id,
+  queueUpdate(block.id, {
     translated: clearing ? null : block.translated,
-    meta_edited: !clearing,
+    meta: { edited: !clearing },
   });
+}
+
+// Junta os campos alterados de um bloco até o próximo salvamento.
+function queueUpdate(blockId, fields) {
+  const pending = state.dirty.get(blockId) || { id: blockId };
+  state.dirty.set(blockId, { ...pending, ...fields });
   clearTimeout(state.saveTimer);
   state.saveTimer = setTimeout(flushSaves, 900);
 }
@@ -356,11 +441,7 @@ async function flushSaves() {
   clearTimeout(state.saveTimer);
   if (!state.dirty.size || !state.project) return;
 
-  const updates = [...state.dirty.values()].map((u) => ({
-    id: u.id,
-    translated: u.translated,
-    meta: { edited: u.meta_edited },
-  }));
+  const updates = [...state.dirty.values()];
   state.dirty.clear();
 
   try {
@@ -415,6 +496,64 @@ async function splitHere(blockId) {
   } catch (error) {
     toast(error.message, 'error');
   }
+}
+
+/* ------------------------------------------------- estrutura dos blocos */
+
+// Cada operação grava antes o que está pendente (para a edição não se perder
+// no redesenho) e recebe de volta o capítulo inteiro, já alterado.
+async function changeStructure(path, options, after) {
+  await flushSaves();
+  try {
+    const data = await api(`/api/projects/${state.project.id}${path}`, {
+      headers: { 'Content-Type': 'application/json' },
+      ...options,
+    });
+    const index = state.doc.chapters.findIndex((c) => c.id === data.chapter.id);
+    if (index >= 0) state.doc.chapters[index] = data.chapter;
+    if (data.project) { state.project = data.project; updateStat(); }
+    renderRail();
+    renderEditor();
+    refreshPreview();
+    after?.(data);
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+
+function mergeWithNext(block) {
+  changeStructure(`/blocks/${block.id}/merge-next`, { method: 'POST' }, (data) => {
+    const note = data.block.translated ? '' : ' A tradução precisa ser refeita.';
+    toast(`Parágrafos juntados.${note}`);
+  });
+}
+
+function insertBelow(block) {
+  const chapter = currentChapter();
+  const index = chapter.blocks.findIndex((b) => b.id === block.id) + 1;
+  changeStructure(
+    `/chapters/${chapter.id}/blocks`,
+    { method: 'POST', body: JSON.stringify({ index }) },
+    (data) => {
+      const field = document.querySelector(
+        `.block[data-id="${data.block.id}"] .block__source-field`
+      );
+      field?.focus();
+    }
+  );
+}
+
+function deleteBlock(block) {
+  const chapterId = state.chapterId;
+  changeStructure(`/blocks/${block.id}`, { method: 'DELETE' }, (data) => {
+    toast('Bloco apagado.', 'info', {
+      label: 'Desfazer',
+      onClick: () => changeStructure(`/chapters/${chapterId}/blocks`, {
+        method: 'POST',
+        body: JSON.stringify(data.removed),
+      }),
+    });
+  });
 }
 
 function updateStat() {

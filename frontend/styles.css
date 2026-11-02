@@ -355,6 +355,7 @@ button {
 
 .block__tools {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   opacity: 0;
   margin-top: 6px;
@@ -373,6 +374,25 @@ button {
 }
 
 .block__tool:hover { border-color: var(--pencil); color: var(--pencil-deep); }
+
+.block__tool--danger:hover,
+.block__tool--danger[data-armed] { border-color: var(--alert); color: var(--alert); }
+.block__tool--danger[data-armed] { background: #fbeeea; }
+
+/* Original editável, só em blocos inseridos pelo usuário. */
+.block__source-field {
+  display: block;
+  width: 100%;
+  border: none;
+  border-bottom: 1px dashed #ddd9d2;
+  background: none;
+  resize: none;
+  padding: 0 0 2px;
+  overflow: hidden;
+}
+
+.block__source-field:focus { outline: none; border-bottom-color: var(--pencil); }
+.block__source-field::placeholder { color: #b3ada3; font-style: italic; }
 
 /* --------------------------------------------------------------- preview */
 
@@ -655,6 +675,20 @@ button {
 
 .toast[data-tone="error"] { border-color: var(--alert); color: #f0c4bb; }
 .toast[hidden] { display: none; }
+
+.toast__action {
+  margin-left: 10px;
+  padding: 2px 8px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.toast__action:hover { border-color: currentColor; }
 
 .empty {
   color: var(--on-bench-dim);

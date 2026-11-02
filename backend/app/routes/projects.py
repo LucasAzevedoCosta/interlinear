@@ -11,7 +11,7 @@ from typing import Any, Callable, TypeVar
 from fastapi import APIRouter, Body, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse, HTMLResponse, Response
 
-from ..core.blocks import Block, Chapter, Document
+from ..core.blocks import TRANSLATABLE, Block, Chapter, Document, join_hyphenated
 from ..core.epub_read import read_epub
 from ..core.epub_write import DEFAULT_CSS, chapter_to_xhtml, write_epub
 from ..core.pdf_extract import extract_blocks
@@ -261,6 +261,100 @@ async def merge_chapter(project_id: str, chapter_id: str) -> dict[str, Any]:
     return {"document": await _update(get_store(), project_id, change)}
 
 
+# Blocos: os consertos que a extração mais pede. Cada rota devolve o capítulo
+# inteiro para a interface substituir o que tem, sem recarregar o livro.
+
+
+@router.delete("/{project_id}/blocks/{block_id}")
+async def delete_block(project_id: str, block_id: str) -> dict[str, Any]:
+    """Apaga um bloco. Devolve o bloco e a posição, para a interface desfazer."""
+
+    def change(document: Document) -> dict[str, Any]:
+        chapter, index = _locate_block(document, block_id)
+        removed = chapter.blocks.pop(index)
+        return {
+            "chapter": chapter.to_dict(),
+            "removed": {"block": removed.to_dict(), "index": index},
+        }
+
+    return await _update_with_meta(get_store(), project_id, change)
+
+
+@router.post("/{project_id}/blocks/{block_id}/merge-next")
+async def merge_block_with_next(project_id: str, block_id: str) -> dict[str, Any]:
+    """Junta um bloco com o seguinte do mesmo capítulo.
+
+    Conserta o parágrafo que a extração partiu em dois (por uma figura, uma
+    nota de rodapé, uma quebra de página mal detectada).
+    """
+
+    def change(document: Document) -> dict[str, Any]:
+        chapter, index = _locate_block(document, block_id)
+        if index + 1 >= len(chapter.blocks):
+            raise HTTPException(400, "Não há bloco seguinte neste capítulo")
+        first, second = chapter.blocks[index], chapter.blocks[index + 1]
+        if first.kind not in TRANSLATABLE or first.kind != second.kind:
+            # Título com parágrafo não é um parágrafo partido; é estrutura.
+            raise HTTPException(400, "Só blocos de texto do mesmo tipo podem ser juntados")
+
+        # A tradução só sobrevive se as duas metades estavam traduzidas; meia
+        # tradução colada no texto inteiro passaria por pronta na revisão.
+        translated = None
+        if first.translated and second.translated:
+            translated = join_hyphenated(first.translated, second.translated)
+
+        merged = Block(
+            kind=first.kind,
+            text=join_hyphenated(first.text, second.text),
+            translated=translated,
+            page=first.page,
+            meta={
+                **second.meta,
+                **first.meta,
+                "edited": bool(translated)
+                and bool(first.meta.get("edited") or second.meta.get("edited")),
+            },
+        )
+        # Id novo de propósito: uma tradução em andamento ainda tem a tradução
+        # de cada metade pendente pelo id antigo e não deve gravá-la aqui.
+        chapter.blocks[index : index + 2] = [merged]
+        return {"chapter": chapter.to_dict(), "block": merged.to_dict()}
+
+    return await _update_with_meta(get_store(), project_id, change)
+
+
+@router.post("/{project_id}/chapters/{chapter_id}/blocks")
+async def insert_block(
+    project_id: str, chapter_id: str, payload: dict[str, Any] = Body(...)
+) -> dict[str, Any]:
+    """Insere um bloco na posição `index` do capítulo.
+
+    Sem `block`, cria um parágrafo vazio para o usuário escrever o original. Com
+    `block` (o que delete_block devolveu), restaura um bloco apagado, mesmo id.
+    """
+    try:
+        index = int(payload.get("index", 0))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Posição inválida") from None
+    data = payload.get("block") or {}
+    if not isinstance(data, dict):
+        raise HTTPException(400, "Campo 'block' deve ser um objeto")
+
+    def change(document: Document) -> dict[str, Any]:
+        chapter = _find_chapter(document, chapter_id)
+        if data:
+            block = Block.from_dict(data)
+            if block.id in document.block_index():
+                raise HTTPException(409, "Já existe um bloco com esse id")
+        else:
+            block = Block(kind="paragraph", meta={"inserted": True})
+        position = max(0, min(index, len(chapter.blocks)))
+        chapter.blocks.insert(position, block)
+        return {"chapter": chapter.to_dict(), "block": block.to_dict()}
+
+    return await _update_with_meta(get_store(), project_id, change)
+
+
 @router.delete("/{project_id}")
 async def delete_project(project_id: str) -> dict[str, Any]:
     # Uma tradução em andamento continuaria pagando por lotes que não têm mais
@@ -369,6 +463,26 @@ async def _update(
         return await asyncio.to_thread(store.update, project_id, change)
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(404, "Projeto não encontrado") from exc
+
+
+async def _update_with_meta(
+    store: ProjectStore,
+    project_id: str,
+    change: Callable[[Document], dict[str, Any]],
+) -> dict[str, Any]:
+    """_update que acrescenta os metadados (contagem traduzida) à resposta."""
+    result = await _update(store, project_id, change)
+    meta = store.get_meta(project_id)
+    result["project"] = meta.to_dict() if meta else None
+    return result
+
+
+def _locate_block(document: Document, block_id: str) -> tuple[Chapter, int]:
+    for chapter in document.chapters:
+        for index, block in enumerate(chapter.blocks):
+            if block.id == block_id:
+                return chapter, index
+    raise HTTPException(404, "Bloco não encontrado")
 
 
 def _find_chapter(document: Document, chapter_id: str) -> Chapter:
