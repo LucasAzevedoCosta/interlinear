@@ -324,20 +324,19 @@ revisão é só de sentido.
 
 Em ordem de retorno sobre esforço:
 
-1. **Corrigir a junção de hífen composto.** Hoje `"guarda-" + "chuva"` vira
-   `guardachuva`. Dicionário, lista de prefixos ou um modelo pequeno.
-2. **Marcação automática de suspeitos.** Regras triviais (parágrafo começando
+1. **Marcação automática de suspeitos.** Regras triviais (parágrafo começando
    em minúscula, título longo demais, bloco de um caractere) marcadas na
    margem, com um "ir para o próximo suspeito". Transforma horas de revisão em
    minutos.
-3. **IA como árbitro dos suspeitos.** Mesma marcação do item 2, mas roteada
-   para um modelo pequeno antes de chegar ao humano. Custa centavos.
-4. **Expor os limiares na interface**, para calibrar por livro sem editar
+2. **IA como árbitro dos suspeitos.** Mesma marcação do item 1, mas roteada
+   para um modelo pequeno antes de chegar ao humano. Custa centavos. Serve
+   também para o hífen que as regras não decidem.
+3. **Expor os limiares na interface**, para calibrar por livro sem editar
    código.
-5. **OCR** para PDFs escaneados.
+4. **OCR** para PDFs escaneados.
 
-O item 1 é bug conhecido, não funcionalidade nova. Itálico e negrito na
-extração e imagens do PDF, que já estiveram nesta lista, estão feitos.
+Itálico e negrito na extração, imagens do PDF e o hífen de palavra composta,
+que já estiveram nesta lista, estão feitos.
 
 ---
 

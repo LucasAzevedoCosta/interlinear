@@ -44,20 +44,31 @@ enfeite.
 Divididas entre o que é falha de projeto (consertável) e o que é limite da
 abordagem.
 
-### Bugs identificados, ainda não corrigidos
+### Hífen no fim da linha
 
-**Junção de hífen erra em palavras compostas.** A regra em
-`blocks.join_hyphenated` é: se a linha termina em hífen e a próxima começa com
-minúscula, junta e remove o hífen.
+Quando a linha termina em hífen e a próxima começa com minúscula, é preciso
+decidir se o hífen é de quebra de sílaba ("exem-" + "plo") ou da palavra
+("guarda-" + "chuva"). `blocks.keeps_hyphen` decide nesta ordem:
+
+1. **O próprio livro.** Se "guarda-chuva" aparece com hífen no meio de alguma
+   linha, o hífen fica. Se "excesso" aparece inteiro, junta. Vale para
+   qualquer idioma e cobre as ênclises ("disse-lhe") de quem as usa muito.
+2. **Regras que não se confundem com sílaba**: ênclise depois de vogal
+   acentuada ("fazê-lo", "pô-la"), "-no/-na" depois de som nasal
+   ("deram-na", "põe-no"), "-feira" e os prefixos "pré", "pós", "pró",
+   "recém", "além", "aquém" e "vice".
+3. **Na dúvida, junta**, porque o hífen de quebra é muito mais comum.
 
 ```
-"exem-" + "plo"     → "exemplo"       correto
-"guarda-" + "chuva" → "guardachuva"   errado
+"exem-" + "plo"     → "exemplo"
+"guarda-" + "chuva" → "guarda-chuva"   se o livro escreve assim em outro lugar
+"fazê-" + "lo"      → "fazê-lo"
+"pe-" + "na"        → "pena"           "-na" solto não é tratado como pronome
 ```
 
-A heurística atual usa a capitalização da palavra seguinte como pista, o que
-só pega compostos com nome próprio ("Bem-" + "Vindo"). Precisa de dicionário,
-de lista de prefixos, ou de um modelo (ver seção 5).
+O que ainda erra: um composto que só aparece quebrado no fim da linha, nunca
+inteiro, e não cai nas regras (um "disse-" + "lhe" único no livro, por
+exemplo). Um modelo pequeno resolveria o resto (ver seção 5).
 
 ### Limites da abordagem heurística
 
@@ -230,9 +241,9 @@ fragmentos curtos**. Isso muda tudo em relação a custo e a tamanho de modelo:
 pontuação; um modelo entende se a frase está gramaticalmente em aberto.
 Entrada: últimos ~120 caracteres de A + primeiros ~120 de B. Saída: sim/não.
 
-**2. Resolver hífen de palavra composta.** Resolve o bug do `guarda-chuva` sem
-precisar de dicionário por idioma. Entrada: as duas partes. Saída: a palavra
-unida.
+**2. Resolver o hífen que as regras não decidem.** O vocabulário do livro e
+as regras de `keeps_hyphen` cobrem a maioria; sobra o composto que só aparece
+quebrado. Entrada: as duas partes e a frase. Saída: a palavra unida.
 
 **3. Classificar blocos ambíguos.** Para os blocos marcados como suspeitos:
 *"isto é título de capítulo, parágrafo, legenda, nota de rodapé ou cabeçalho

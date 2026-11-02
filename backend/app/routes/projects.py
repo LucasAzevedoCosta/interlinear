@@ -11,7 +11,14 @@ from typing import Any, Callable, TypeVar
 from fastapi import APIRouter, Body, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse, HTMLResponse, Response
 
-from ..core.blocks import TRANSLATABLE, Block, Chapter, Document, join_hyphenated
+from ..core.blocks import (
+    TRANSLATABLE,
+    Block,
+    Chapter,
+    Document,
+    Vocabulary,
+    join_hyphenated,
+)
 from ..core.epub_read import read_epub
 from ..core.epub_write import DEFAULT_CSS, chapter_to_xhtml, write_epub
 from ..core.pdf_extract import extract_blocks
@@ -302,13 +309,16 @@ async def merge_block_with_next(project_id: str, block_id: str) -> dict[str, Any
 
         # A tradução só sobrevive se as duas metades estavam traduzidas; meia
         # tradução colada no texto inteiro passaria por pronta na revisão.
+        vocabulary = Vocabulary.from_texts(
+            text for block in document.all_blocks() for text in (block.text, block.translated or "")
+        )
         translated = None
         if first.translated and second.translated:
-            translated = join_hyphenated(first.translated, second.translated)
+            translated = join_hyphenated(first.translated, second.translated, vocabulary)
 
         merged = Block(
             kind=first.kind,
-            text=join_hyphenated(first.text, second.text),
+            text=join_hyphenated(first.text, second.text, vocabulary),
             translated=translated,
             page=first.page,
             meta={

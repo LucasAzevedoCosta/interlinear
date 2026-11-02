@@ -46,7 +46,7 @@ from pdfminer.pdftypes import (
 )
 from pdfminer.psparser import PSLiteral
 
-from .blocks import Block, normalize_spaces
+from .blocks import Block, Vocabulary, keeps_hyphen, normalize_spaces
 
 log = logging.getLogger(__name__)
 
@@ -163,13 +163,23 @@ def _styled_line(text_line: LTTextLine) -> list[StyledChar]:
     return chars
 
 
-def _join_styled(previous: list[StyledChar], nxt: list[StyledChar]) -> list[StyledChar]:
+def _join_styled(
+    previous: list[StyledChar],
+    nxt: list[StyledChar],
+    vocabulary: Vocabulary | None = None,
+) -> list[StyledChar]:
     """join_hyphenated sobre caracteres com estilo. Mesmas regras."""
     while previous and previous[-1][0] == " ":
         previous = previous[:-1]
     while nxt and nxt[0][0] == " ":
         nxt = nxt[1:]
-    if previous and previous[-1][0] == "-" and nxt[:1] and nxt[0][0].islower():
+    before = _last_word(previous[:-1]) if previous and previous[-1][0] == "-" else ""
+    if before and nxt[:1] and nxt[0][0].isupper():
+        return previous + nxt  # Jean-Paul
+    if before and nxt[:1] and nxt[0][0].islower():
+        after = _first_word(nxt)
+        if after and keeps_hyphen(before, after, vocabulary):
+            return previous + nxt
         return previous[:-1] + nxt
     if not previous:
         return list(nxt)
@@ -177,6 +187,24 @@ def _join_styled(previous: list[StyledChar], nxt: list[StyledChar]) -> list[Styl
         return previous
     joint = previous[-1][1] if previous[-1][1] == nxt[0][1] else ""
     return previous + [(" ", joint)] + nxt
+
+
+def _last_word(chars: list[StyledChar]) -> str:
+    word: list[str] = []
+    for char, _ in reversed(chars):
+        if not char.isalnum():
+            break
+        word.append(char)
+    return "".join(reversed(word))
+
+
+def _first_word(chars: list[StyledChar]) -> str:
+    word: list[str] = []
+    for char, _ in chars:
+        if not char.isalnum():
+            break
+        word.append(char)
+    return "".join(word)
 
 
 _OPEN = {"b": "<strong>", "i": "<em>"}
@@ -588,6 +616,9 @@ def extract_blocks(
     log.info("Tamanho de fonte do corpo detectado: %.1f", body_size)
 
     groups = _group_into_paragraphs(lines, body_size)
+    # Palavras como o livro as escreve no meio das linhas: decide se o hífen
+    # de "guarda-" no fim de uma linha é de quebra ou da palavra.
+    vocabulary = Vocabulary.from_texts(line.text for line in lines)
 
     # (página, topo, bloco): a posição serve para encaixar as imagens depois.
     placed: list[tuple[int, float, Block]] = []
@@ -596,7 +627,7 @@ def extract_blocks(
 
         chars: list[StyledChar] = []
         for line in group:
-            chars = _join_styled(chars, line.chars)
+            chars = _join_styled(chars, line.chars, vocabulary)
         plain = normalize_spaces("".join(char for char, _ in chars))
 
         if not plain:

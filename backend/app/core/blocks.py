@@ -153,15 +153,86 @@ def normalize_spaces(text: str) -> str:
     return _WS.sub(" ", text.replace(_SOFT_HYPHEN, "")).strip()
 
 
-def join_hyphenated(previous: str, nxt: str) -> str:
+_WORD = re.compile(r"\w+(?:-\w+)*")
+_TAGS = re.compile(r"<[^>]+>")
+_LAST_FRAGMENT = re.compile(r"(\w+)-$")
+_FIRST_FRAGMENT = re.compile(r"^(\w+)")
+
+
+@dataclass
+class Vocabulary:
+    """As palavras do próprio livro, para decidir o hífen de fim de linha.
+
+    Um livro de verdade costuma escrever "guarda-chuva" inteiro no meio de
+    alguma linha. Essa é a evidência mais confiável para saber se o hífen da
+    quebra de linha faz parte da palavra, e vale para qualquer idioma.
+    """
+
+    hyphenated: set[str] = field(default_factory=set)
+    plain: set[str] = field(default_factory=set)
+
+    @classmethod
+    def from_texts(cls, texts) -> "Vocabulary":
+        vocabulary = cls()
+        for text in texts:
+            for word in _WORD.findall(_TAGS.sub("", text).lower()):
+                (vocabulary.hyphenated if "-" in word else vocabulary.plain).add(word)
+        return vocabulary
+
+
+# Sem evidência no livro, só regras que não se confundem com divisão silábica.
+# Pronomes curtos soltos ("-na", "-se", "-me") ficam de fora de propósito:
+# "pe-na" e "pas-se" são quebras de sílaba comuns.
+_ACCENTED_END = tuple("áéêíóôú")
+_NASAL_END = ("m", "ão", "õe", "ãe")
+_ENCLITIC_AFTER_ACCENT = frozenset({"lo", "la", "los", "las"})
+_ENCLITIC_AFTER_NASAL = frozenset({"no", "na", "nos", "nas"})
+_COMPOUND_SUFFIXES = frozenset({"feira", "feiras"})
+# "ex", "sub", "mal" e "sem" ficam de fora: "ex-cesso", "sub-ir", "mal-dade" e
+# "sem-pre" são quebras de sílaba, não prefixos.
+_COMPOUND_PREFIXES = frozenset({"pré", "pós", "pró", "recém", "além", "aquém", "vice"})
+
+
+def keeps_hyphen(before: str, after: str, vocabulary: Vocabulary | None = None) -> bool:
+    """Diz se o hífen entre `before` e `after` (fim e começo de linha) é da palavra.
+
+    "guarda" + "chuva" → True se o livro escreve "guarda-chuva" em outro lugar;
+    "exem" + "plo" → False. Na dúvida, False: o hífen de quebra é muito mais
+    comum que o de palavra composta.
+    """
+    before, after = before.lower(), after.lower()
+    if vocabulary is not None:
+        if f"{before}-{after}" in vocabulary.hyphenated:
+            return True
+        if f"{before}{after}" in vocabulary.plain:
+            return False
+
+    if after in _ENCLITIC_AFTER_ACCENT and before.endswith(_ACCENTED_END):
+        return True  # fazê-lo, pô-la, vendê-los
+    if after in _ENCLITIC_AFTER_NASAL and before.endswith(_NASAL_END):
+        return True  # deram-na, põe-no, dão-nos
+    if after in _COMPOUND_SUFFIXES:
+        return True  # segunda-feira
+    return before in _COMPOUND_PREFIXES  # pré-história, recém-chegado
+
+
+def join_hyphenated(previous: str, nxt: str, vocabulary: Vocabulary | None = None) -> str:
     """Junta duas linhas, desfazendo a hifenização de quebra de linha.
 
-    "exem-" + "plo" vira "exemplo", mas "bem-" + "vindo" preserva o hífen
-    quando a palavra seguinte começa com maiúscula (provável nome composto).
+    "exem-" + "plo" vira "exemplo". O hífen fica quando a palavra seguinte
+    começa com maiúscula (provável nome composto) ou quando keeps_hyphen diz
+    que ele faz parte da palavra ("guarda-" + "chuva").
     """
     previous = previous.rstrip()
-    if previous.endswith("-") and nxt[:1].islower():
-        return previous[:-1] + nxt.lstrip()
+    nxt = nxt.lstrip()
+    before = _LAST_FRAGMENT.search(previous)
+    if before and nxt[:1].isupper():
+        return previous + nxt  # Jean-Paul
+    if before and nxt[:1].islower():
+        after = _FIRST_FRAGMENT.search(nxt)
+        if after and keeps_hyphen(before.group(1), after.group(1), vocabulary):
+            return previous + nxt
+        return previous[:-1] + nxt
     if not previous:
-        return nxt.lstrip()
-    return previous + " " + nxt.lstrip()
+        return nxt
+    return previous + " " + nxt
