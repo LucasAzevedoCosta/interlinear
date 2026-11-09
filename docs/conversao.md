@@ -154,7 +154,31 @@ Não tratado: notas sem marcador, notas no pé de uma só coluna em página de
 duas colunas, e notas de fim de livro (que já vêm como texto normal num
 capítulo "Notas"). EPUBs importados não convertem as notas deles.
 
-**Tabelas.** Viram parágrafos soltos.
+**Tabelas.** O pdfminer separa em linhas diferentes trechos na mesma altura
+com um vão grande entre eles. `_find_tables` procura 3 ou mais alturas
+seguidas com 2 ou mais trechos cada, alinhados em colunas (cada trecho de uma
+linha cai numa coluna diferente). Com só 2 células por linha, elas precisam
+ser estreitas (menos de 35% da largura do texto), senão são duas colunas de
+texto corrido. A detecção roda antes da de colunas, para uma tabela de duas
+colunas não ser lida como texto em duas colunas.
+
+A tabela vira um bloco `table` em texto puro, uma linha por linha, células
+separadas por ` | `:
+
+```
+Peça | Ano | Preço
+Mola real | 1945 | 3,50
+```
+
+O editor mostra e edita assim, e o prompt do tradutor pede para manter as
+linhas e os separadores. No EPUB vira um `<table>`; a primeira linha é
+cabeçalho (`<th>`) se estava toda em negrito. Uma linha que perdeu um `|` na
+tradução é completada com células vazias. Tabela partida na quebra de página
+vira dois blocos, que "Juntar com o próximo" une.
+
+Não tratado: célula com texto em mais de uma linha (a linha de continuação
+tem um trecho só e interrompe a tabela), células coladas sem vão (o pdfminer
+junta numa linha só) e células mescladas.
 
 **Imagens só nos formatos comuns.** Fotos em JPEG e bitmaps de 8 bits em RGB ou
 tons de cinza são extraídos e encaixados entre os parágrafos pela posição na

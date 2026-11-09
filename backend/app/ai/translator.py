@@ -45,6 +45,8 @@ natural para um leitor nativo de {target}.
 coloquial, arcaico continua arcaico.
 - Mantenha intactas as marcações inline como <em>, <strong> e <a href="...">, \
 nas mesmas palavras correspondentes.
+- Segmentos com várias linhas e células separadas por " | " são tabelas: \
+traduza cada célula e mantenha as mesmas linhas e os mesmos separadores.
 - Não acrescente, não remova e não resuma nada. Não explique suas escolhas.
 - Nomes próprios de pessoas e lugares permanecem como estão, salvo indicação \
 no glossário.

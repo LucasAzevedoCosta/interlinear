@@ -194,7 +194,9 @@ write_epub(doc, "livro.epub")
 - **Notas de rodapé** são reconhecidas pelo corpo menor no pé da página e
   por um marcador ("1", "*", "†"). Notas sem marcador, ou no pé de uma só
   coluna em página de duas colunas, ainda entram como parágrafos.
-- **Tabelas** viram parágrafos soltos.
+- **Tabelas** são reconhecidas quando cada linha tem células alinhadas em
+  colunas. Célula com texto em mais de uma linha, e tabela sem vão entre as
+  colunas, ainda saem erradas; dá para corrigir o texto no editor.
 
 A lista completa, com a explicação de por que a conversão de PDF é um problema
 inverso, como o preview compensa, onde um modelo de IA ajudaria e quanto isso

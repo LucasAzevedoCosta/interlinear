@@ -87,6 +87,17 @@ p.image {
 
 p.image + p { text-indent: 0; }
 
+table.table {
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.9em;
+}
+table.table th, table.table td {
+  border: 1px solid #999;
+  padding: 0.2em 0.5em;
+  text-align: left;
+  vertical-align: top;
+}
 section.footnotes {
   margin-top: 2em;
   border-top: 1px solid currentColor;
@@ -151,8 +162,11 @@ def _block_to_xhtml(block: Block, *, use_translation: bool) -> str:
     if not text.strip():
         return ""
 
-    body = inline_html(text)
     anchor = f' id="b{block.id}"'
+    if block.kind == "table":
+        return _table_xhtml(text, anchor, header=bool(block.meta.get("header")))
+
+    body = inline_html(text)
 
     if block.kind == "heading1":
         return f"<h1{anchor}>{body}</h1>"
@@ -166,6 +180,29 @@ def _block_to_xhtml(block: Block, *, use_translation: bool) -> str:
         return f"<li{anchor}>{body}</li>"
 
     return f"<p{anchor}>{body}</p>"
+
+
+def _table_xhtml(text: str, anchor: str, *, header: bool) -> str:
+    """Uma tabela a partir do texto "a | b\\nc | d" do bloco "table".
+
+    Linhas com menos células que a mais cheia são completadas com células
+    vazias, para a tabela não sair torta se a tradução perder um "|".
+    """
+    rows = [
+        [cell.strip() for cell in line.split("|")]
+        for line in text.split("\n")
+        if line.strip()
+    ]
+    width = max(len(row) for row in rows)
+    parts = [f'<table class="table"{anchor}>']
+    for number, row in enumerate(rows):
+        tag = "th" if header and number == 0 else "td"
+        cells = "".join(
+            f"<{tag}>{inline_html(cell)}</{tag}>" for cell in row + [""] * (width - len(row))
+        )
+        parts.append(f"<tr>{cells}</tr>")
+    parts.append("</table>")
+    return "".join(parts)
 
 
 _NOTE_CALL = re.compile(r"<sup>([^<>]{1,6})</sup>")

@@ -354,6 +354,9 @@ button {
 .block[data-kind="list_item"] .block__field { padding-left: 14px; }
 .block[data-kind="footnote"] .block__field,
 .block[data-kind="footnote"] .block__source { font-size: 0.88em; }
+/* Tabela em texto: uma linha por linha da tabela, células separadas por " | ". */
+.block[data-kind="table"] .block__field,
+.block[data-kind="table"] .block__source { white-space: pre-wrap; font-variant-numeric: tabular-nums; }
 
 .block__tools {
   display: flex;

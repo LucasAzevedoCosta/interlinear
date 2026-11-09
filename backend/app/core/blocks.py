@@ -23,13 +23,19 @@ BlockKind = Literal[
     # no texto é um <sup> com o mesmo marcador. No EPUB vai para o fim do
     # capítulo; no editor, fica logo depois do parágrafo da página dela.
     "footnote",
+    # Tabela em texto puro: uma linha da tabela por linha do texto, células
+    # separadas por " | ". meta["header"] diz se a primeira linha é cabeçalho.
+    "table",
     "image",
     "page_break",
 ]
 
 # Tipos cujo texto faz sentido traduzir.
 TRANSLATABLE: frozenset[str] = frozenset(
-    {"heading1", "heading2", "heading3", "paragraph", "quote", "list_item", "footnote"}
+    {
+        "heading1", "heading2", "heading3", "paragraph", "quote", "list_item",
+        "footnote", "table",
+    }
 )
 
 

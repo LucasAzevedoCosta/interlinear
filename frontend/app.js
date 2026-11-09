@@ -230,7 +230,7 @@ function currentChapter() {
 
 const MARKS = {
   heading1: 'H1', heading2: 'H2', heading3: 'H3',
-  paragraph: '¶', quote: '❝', list_item: '•', footnote: '†',
+  paragraph: '¶', quote: '❝', list_item: '•', footnote: '†', table: '▦',
   image: '▣', page_break: '⎯',
 };
 
@@ -270,7 +270,7 @@ function renderEditor() {
 }
 
 const TEXT_KINDS = new Set([
-  'heading1', 'heading2', 'heading3', 'paragraph', 'quote', 'list_item', 'footnote',
+  'heading1', 'heading2', 'heading3', 'paragraph', 'quote', 'list_item', 'footnote', 'table',
 ]);
 
 // Mesma regra do inline_html do backend: escapa tudo e reabilita só as tags de

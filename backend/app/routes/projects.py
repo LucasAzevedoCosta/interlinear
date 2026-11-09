@@ -312,13 +312,20 @@ async def merge_block_with_next(project_id: str, block_id: str) -> dict[str, Any
         vocabulary = Vocabulary.from_texts(
             text for block in document.all_blocks() for text in (block.text, block.translated or "")
         )
+        def join(a: str, b: str) -> str:
+            # Tabela partida na quebra de página: as linhas da segunda continuam
+            # a primeira, sem mexer em hífen.
+            if first.kind == "table":
+                return f"{a.rstrip()}\n{b.lstrip()}"
+            return join_hyphenated(a, b, vocabulary)
+
         translated = None
         if first.translated and second.translated:
-            translated = join_hyphenated(first.translated, second.translated, vocabulary)
+            translated = join(first.translated, second.translated)
 
         merged = Block(
             kind=first.kind,
-            text=join_hyphenated(first.text, second.text, vocabulary),
+            text=join(first.text, second.text),
             translated=translated,
             page=first.page,
             meta={

@@ -86,6 +86,12 @@ MIN_COLUMN_LINES = 4
 MIN_COLUMN_SHARE = 0.25
 MAX_SPANNING_SHARE = 0.20
 
+# Tabela: pelo menos tantas linhas seguidas com duas células ou mais. Com só
+# duas células por linha, elas precisam ser estreitas (fração da largura do
+# texto), senão são duas colunas de texto corrido.
+MIN_TABLE_ROWS = 3
+MAX_TWO_CELL_WIDTH = 0.35
+
 # Filtros sem perda que o pdfminer decodifica sozinho em stream.get_data().
 _LOSSLESS_FILTERS = frozenset(
     LITERALS_FLATE_DECODE
@@ -132,6 +138,8 @@ class Line:
     column: int = 0
     # Posição na ordem de leitura da página.
     flow: float = 0.0
+    # Número da tabela na página, se a linha é célula de uma.
+    table: int | None = None
 
     @property
     def word_count(self) -> int:
@@ -473,6 +481,73 @@ def _find_gutter(lines: list[Line]) -> float | None:
     return best[1] if best else None
 
 
+def _find_tables(lines: list[Line]) -> list[list[Line]]:
+    """As tabelas da página, cada uma como a lista das suas linhas (células).
+
+    O pdfminer separa em linhas diferentes trechos na mesma altura com um vão
+    grande entre eles. Uma tabela é uma sequência de MIN_TABLE_ROWS ou mais
+    alturas seguidas com dois trechos ou mais cada, alinhados em colunas.
+    """
+    if len(lines) < 2 * MIN_TABLE_ROWS:
+        return []
+    width = (max(line.x1 for line in lines) - min(line.x0 for line in lines)) or 1.0
+
+    rows: list[list[Line]] = []
+    for line in sorted(lines, key=lambda line: (line.top, line.x0)):
+        if rows and abs(line.top - rows[-1][0].top) <= line.size * 0.4:
+            rows[-1].append(line)
+        else:
+            rows.append([line])
+
+    tables: list[list[Line]] = []
+    run: list[list[Line]] = []
+
+    def close() -> None:
+        if len(run) >= MIN_TABLE_ROWS and _looks_tabular(run, width):
+            tables.append([line for row in run for line in row])
+        run.clear()
+
+    for row in rows:
+        if len(row) < 2:
+            close()
+            continue
+        if run and row[0].top - run[-1][0].top > row[0].size * 3:
+            close()
+        run.append(sorted(row, key=lambda line: line.x0))
+    close()
+    return tables
+
+
+def _looks_tabular(rows: list[list[Line]], width: float) -> bool:
+    cells = [line for row in rows for line in row]
+    if max(len(row) for row in rows) < 3:
+        mean_width = statistics.mean(line.x1 - line.x0 for line in cells)
+        if mean_width / width >= MAX_TWO_CELL_WIDTH:
+            return False  # duas colunas de texto corrido
+    starts = _column_starts(cells)
+    # Cada célula de uma linha cai numa coluna diferente, e não há mais
+    # colunas que células na linha mais cheia (com folga de uma).
+    for row in rows:
+        if len({_column_of(line, starts) for line in row}) < len(row):
+            return False
+    return len(starts) <= max(len(row) for row in rows) + 1
+
+
+def _column_starts(cells: list[Line]) -> list[float]:
+    """Onde começa cada coluna da tabela: os x0 das células, agrupados."""
+    size = statistics.median(line.size for line in cells)
+    starts: list[float] = []
+    for x0 in sorted(line.x0 for line in cells):
+        if not starts or x0 - last > size * 1.5:
+            starts.append(x0)
+        last = x0
+    return starts
+
+
+def _column_of(line: Line, starts: list[float]) -> int:
+    return max(bisect.bisect_right(starts, line.x0 + 0.5) - 1, 0)
+
+
 def _reading_order(lines: list[Line], images: list[PageImage]) -> list[Line]:
     """Põe as linhas da página em ordem de leitura e marca Line.flow.
 
@@ -484,13 +559,25 @@ def _reading_order(lines: list[Line], images: list[PageImage]) -> list[Line]:
     As imagens ganham um flow entre o das linhas, para entrarem no lugar certo
     em _merge_positioned.
     """
-    gutter = _find_gutter(lines)
+    # Tabelas primeiro: uma tabela de duas colunas seria lida como texto em
+    # duas colunas, e o pdfminer costuma entregar as células coluna a coluna.
+    tables = _find_tables(lines)
+    in_table = {id(line) for table in tables for line in table}
+    text = [line for line in lines if id(line) not in in_table]
+    boxes = [
+        (min(l.top for l in t), min(l.x0 for l in t), max(l.x1 for l in t)) for t in tables
+    ]
+
+    gutter = _find_gutter(text)
 
     if gutter is None:
         def key(top: float, x0: float, x1: float) -> tuple:
             return (top,)
     else:
-        spans = sorted(line.top for line in lines if line.x0 < gutter < line.x1)
+        spans = sorted(
+            [line.top for line in text if line.x0 < gutter < line.x1]
+            + [top for top, x0, x1 in boxes if x0 < gutter < x1]
+        )
 
         def key(top: float, x0: float, x1: float) -> tuple:
             band = bisect.bisect_left(spans, top)
@@ -498,10 +585,35 @@ def _reading_order(lines: list[Line], images: list[PageImage]) -> list[Line]:
                 return (band, 2, top)
             return (band, 0 if x1 <= gutter else 1, top)
 
-        for line in lines:
+        for line in text:
             line.column = key(line.top, line.x0, line.x1)[1]
-        lines = sorted(lines, key=lambda line: key(line.top, line.x0, line.x1))
-        log.debug("Página %d em duas colunas, calha em x=%.0f", lines[0].page, gutter)
+        text = sorted(text, key=lambda line: key(line.top, line.x0, line.x1))
+        log.debug("Página %d em duas colunas, calha em x=%.0f", text[0].page, gutter)
+
+    # Cada tabela entra inteira, linha por linha, antes da primeira linha de
+    # texto que vem depois dela.
+    placements: list[tuple[int, tuple, list[Line]]] = []
+    for number, (table, box) in enumerate(zip(tables, boxes)):
+        table_key = key(*box)
+        at = next(
+            (i for i, line in enumerate(text) if key(line.top, line.x0, line.x1) > table_key),
+            len(text),
+        )
+        for line in table:
+            line.table = number
+            line.column = table_key[1] if gutter is not None else 0
+        placements.append((at, table_key, sorted(table, key=lambda l: (l.top, l.x0))))
+    placements.sort(key=lambda placement: placement[:2])
+
+    lines = []
+    pending = iter(placements)
+    upcoming = next(pending, None)
+    for index, line in enumerate([*text, None]):
+        while upcoming is not None and upcoming[0] == index:
+            lines.extend(upcoming[2])
+            upcoming = next(pending, None)
+        if line is not None:
+            lines.append(line)
 
     for index, line in enumerate(lines):
         line.flow = float(index)
@@ -619,7 +731,11 @@ def _split_footnotes(
         if not normal:
             continue  # página toda em corpo menor: apêndice, não nota
         floor = max(line.top for line in normal)
-        zone = [line for line in page_lines if line.size <= limit and line.top > floor]
+        zone = [
+            line
+            for line in page_lines
+            if line.size <= limit and line.top > floor and line.table is None
+        ]
         if not zone or zone[0].top / zone[0].page_height < 0.5:
             continue
         zone.sort(key=lambda line: (line.top, line.x0))
@@ -765,7 +881,10 @@ def _group_into_paragraphs(lines: list[Line], body_size: float) -> list[list[Lin
         current_group = groups[-1]
         split = False
 
-        if current.page != previous.page or (previous.column, current.column) == (0, 1):
+        if current.table is not None or previous.table is not None:
+            # Uma tabela é um grupo só, separado do texto em volta.
+            split = (current.page, current.table) != (previous.page, previous.table)
+        elif current.page != previous.page or (previous.column, current.column) == (0, 1):
             # Páginas diferentes só quebram o parágrafo se a linha anterior
             # terminou uma frase; livros quebram parágrafos entre páginas. O
             # mesmo vale da coluna esquerda para a direita.
@@ -845,6 +964,10 @@ def extract_blocks(
     # (página, flow, bloco): a posição serve para encaixar imagens e notas depois.
     placed: list[tuple[int, float, Block]] = []
     for group in groups:
+        if group[0].table is not None:
+            placed.append((group[0].page, group[0].flow, _table_block(group)))
+            continue
+
         kind = _classify(group, body_size)
 
         chars: list[StyledChar] = []
@@ -893,6 +1016,43 @@ def extract_blocks(
             extras.append((note.page, math.inf, block))
 
     return _merge_positioned(placed, extras), title
+
+
+def _table_block(cells: list[Line]) -> Block:
+    """Monta o bloco "table": linhas separadas por \\n, células por " | ".
+
+    O formato é texto puro de propósito: o editor mostra e edita como está, e
+    o tradutor devolve no mesmo formato. Trechos na mesma célula e na mesma
+    linha (raro) são juntados com espaço. Se a primeira linha é toda em
+    negrito, ela é o cabeçalho (meta.header) e perde o <strong>.
+    """
+    starts = _column_starts(cells)
+    rows: list[list[Line]] = []
+    for line in cells:  # já em ordem de (topo, x0)
+        if rows and abs(line.top - rows[-1][0].top) <= line.size * 0.4:
+            rows[-1].append(line)
+        else:
+            rows.append([line])
+
+    header = all(line.bold for line in rows[0])
+    text_rows: list[str] = []
+    for number, row in enumerate(rows):
+        row_cells = [""] * len(starts)
+        for line in row:
+            chars = line.chars
+            if number == 0 and header:
+                chars = [(char, style.replace("b", "")) for char, style in chars]
+            column = _column_of(line, starts)
+            rendered = normalize_spaces(_render_styled(chars)).replace("|", "/")
+            row_cells[column] = f"{row_cells[column]} {rendered}".strip()
+        text_rows.append(" | ".join(row_cells))
+
+    return Block(
+        kind="table",
+        text="\n".join(text_rows),
+        page=cells[0].page,
+        meta={"size": cells[0].size, "header": header},
+    )
 
 
 def _image_blocks(
