@@ -6,7 +6,8 @@ tamanho de fonte, peso, recuo e espaçamento vertical — em vez de tentar adivi
 pelo texto puro.
 
 O pipeline:
-    1. ler linhas com metadados de fonte
+    1. ler linhas com metadados de fonte, em ordem de leitura (duas colunas
+       são lidas uma depois da outra)
     2. descartar cabeçalhos, rodapés e números de página repetidos
     3. estabelecer o tamanho de fonte do corpo (mediana ponderada)
     4. agrupar linhas em parágrafos por espaçamento e recuo
@@ -23,6 +24,7 @@ docs/licencas.md antes de ativá-lo.
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import logging
 import re
@@ -73,6 +75,14 @@ MIN_IMAGE_POINTS = 40
 # A mesma imagem em tantas páginas ou mais é decoração (logotipo, moldura).
 REPEATED_IMAGE_PAGES = 3
 
+# Duas colunas: cada lado da calha precisa de pelo menos este tanto de linhas
+# (em número e em fração das linhas da página), e no máximo esta fração pode
+# atravessá-la. Os limites evitam ver colunas em poesia ou em diálogos curtos,
+# que só têm linhas do lado esquerdo.
+MIN_COLUMN_LINES = 4
+MIN_COLUMN_SHARE = 0.25
+MAX_SPANNING_SHARE = 0.20
+
 # Filtros sem perda que o pdfminer decodifica sozinho em stream.get_data().
 _LOSSLESS_FILTERS = frozenset(
     LITERALS_FLATE_DECODE
@@ -101,6 +111,11 @@ class Line:
     page_height: float
     # O mesmo texto, caractere a caractere, com o estilo da fonte de cada um.
     chars: list[StyledChar] = field(default_factory=list)
+    # 0 em página de coluna única ou coluna da esquerda, 1 na da direita e 2
+    # numa linha que atravessa as duas (título, número de página).
+    column: int = 0
+    # Posição na ordem de leitura da página.
+    flow: float = 0.0
 
     @property
     def word_count(self) -> int:
@@ -115,6 +130,10 @@ class PageImage:
     top: float
     extension: str  # "jpg" ou "png"
     data: bytes
+    x0: float = 0.0
+    x1: float = 0.0
+    # Entre quais linhas da página a imagem entra (ver Line.flow).
+    flow: float = 0.0
 
 
 @lru_cache(maxsize=256)
@@ -323,6 +342,8 @@ def _read_lines(
         extract_pages(pdf_path, laparams=laparams), start=1
     ):
         page_height = float(page_layout.height) or 1.0
+        page_lines: list[Line] = []
+        page_images: list[PageImage] = []
 
         for element in page_layout:
             if with_images and isinstance(element, LTFigure):
@@ -331,12 +352,14 @@ def _read_lines(
                         continue
                     payload = _image_payload(image)
                     if payload:
-                        images.append(
+                        page_images.append(
                             PageImage(
                                 page=page_number,
                                 top=page_height - float(image.y1),
                                 extension=payload[0],
                                 data=payload[1],
+                                x0=float(image.x0),
+                                x1=float(image.x1),
                             )
                         )
                 continue
@@ -369,7 +392,7 @@ def _read_lines(
                 dominant_font = fonts.most_common(1)[0][0] if fonts else ""
                 bold, italic = _font_flags(dominant_font)
 
-                lines.append(
+                page_lines.append(
                     Line(
                         text=text,
                         size=size,
@@ -384,7 +407,80 @@ def _read_lines(
                     )
                 )
 
+        lines.extend(_reading_order(page_lines, page_images))
+        images.extend(page_images)
+
     return lines, images
+
+
+def _find_gutter(lines: list[Line]) -> float | None:
+    """A posição x da calha entre duas colunas, ou None se a página tem uma só.
+
+    Procura, no terço central do texto, o x que menos linhas atravessam. Vale
+    como calha se sobram linhas suficientes dos dois lados.
+    """
+    if len(lines) < 2 * MIN_COLUMN_LINES:
+        return None
+    left = min(line.x0 for line in lines)
+    right = max(line.x1 for line in lines)
+    low, high = left + (right - left) / 3, right - (right - left) / 3
+
+    best: tuple[int, float] | None = None
+    # A calha começa logo depois do fim de alguma linha da coluna esquerda.
+    for candidate in {line.x1 + 0.5 for line in lines if low <= line.x1 <= high}:
+        on_left = sum(1 for line in lines if line.x1 <= candidate)
+        on_right = sum(1 for line in lines if line.x0 >= candidate)
+        smallest = min(on_left, on_right)
+        if smallest < max(MIN_COLUMN_LINES, len(lines) * MIN_COLUMN_SHARE):
+            continue
+        spanning = len(lines) - on_left - on_right
+        if spanning > len(lines) * MAX_SPANNING_SHARE:
+            continue
+        if best is None or (spanning, -smallest) < (best[0], -best[1]):
+            best = (spanning, candidate)
+    return best[1] if best else None
+
+
+def _reading_order(lines: list[Line], images: list[PageImage]) -> list[Line]:
+    """Põe as linhas da página em ordem de leitura e marca Line.flow.
+
+    Em página de duas colunas, lê a esquerda inteira e depois a direita. Uma
+    linha que atravessa a calha (título, número de página) divide a página em
+    faixas: o que está acima dela é lido antes, o que está abaixo, depois. Em
+    coluna única a ordem do pdfminer é mantida, como sempre foi.
+
+    As imagens ganham um flow entre o das linhas, para entrarem no lugar certo
+    em _place_images.
+    """
+    gutter = _find_gutter(lines)
+
+    if gutter is None:
+        def key(top: float, x0: float, x1: float) -> tuple:
+            return (top,)
+    else:
+        spans = sorted(line.top for line in lines if line.x0 < gutter < line.x1)
+
+        def key(top: float, x0: float, x1: float) -> tuple:
+            band = bisect.bisect_left(spans, top)
+            if x0 < gutter < x1:
+                return (band, 2, top)
+            return (band, 0 if x1 <= gutter else 1, top)
+
+        for line in lines:
+            line.column = key(line.top, line.x0, line.x1)[1]
+        lines = sorted(lines, key=lambda line: key(line.top, line.x0, line.x1))
+        log.debug("Página %d em duas colunas, calha em x=%.0f", lines[0].page, gutter)
+
+    for index, line in enumerate(lines):
+        line.flow = float(index)
+    for image in images:
+        image_key = key(image.top, image.x0, image.x1)
+        after = next(
+            (i for i, line in enumerate(lines) if key(line.top, line.x0, line.x1) > image_key),
+            len(lines),
+        )
+        image.flow = after - 0.5
+    return lines
 
 
 def _strip_running_heads(lines: list[Line]) -> list[Line]:
@@ -539,9 +635,13 @@ def _group_into_paragraphs(lines: list[Line], body_size: float) -> list[list[Lin
     normal_gap = statistics.median(gaps) if gaps else body_size * 1.2
     gap_threshold = normal_gap * 1.45
 
-    # Margem esquerda do corpo: o recuo mais comum.
-    left_margins = Counter(round(line.x0) for line in lines)
-    body_left = left_margins.most_common(1)[0][0] if left_margins else 0
+    # Margem esquerda do corpo: o recuo mais comum, em cada coluna.
+    left_margins: dict[int, Counter[int]] = {}
+    for line in lines:
+        left_margins.setdefault(line.column, Counter())[round(line.x0)] += 1
+    body_left = {
+        column: margins.most_common(1)[0][0] for column, margins in left_margins.items()
+    }
 
     groups: list[list[Line]] = [[lines[0]]]
 
@@ -549,17 +649,21 @@ def _group_into_paragraphs(lines: list[Line], body_size: float) -> list[list[Lin
         current_group = groups[-1]
         split = False
 
-        if current.page != previous.page:
+        if current.page != previous.page or (previous.column, current.column) == (0, 1):
             # Páginas diferentes só quebram o parágrafo se a linha anterior
-            # terminou uma frase; livros quebram parágrafos entre páginas.
+            # terminou uma frase; livros quebram parágrafos entre páginas. O
+            # mesmo vale da coluna esquerda para a direita.
             split = previous.text.rstrip().endswith((".", "!", "?", '"', "”", "»"))
+            if not split and current.column == 1:
+                # Recuo no topo da coluna direita: parágrafo novo.
+                split = current.x0 > body_left[1] + body_size * 0.8
         else:
             vertical_gap = current.top - previous.top
             if vertical_gap > gap_threshold:
                 split = True
             elif abs(current.size - previous.size) > 0.6:
                 split = True
-            elif current.x0 > body_left + body_size * 0.8:
+            elif current.x0 > body_left[current.column] + body_size * 0.8:
                 # Recuo de primeira linha indica parágrafo novo.
                 split = True
             elif _looks_like_list_item(current.text):
@@ -620,7 +724,7 @@ def extract_blocks(
     # de "guarda-" no fim de uma linha é de quebra ou da palavra.
     vocabulary = Vocabulary.from_texts(line.text for line in lines)
 
-    # (página, topo, bloco): a posição serve para encaixar as imagens depois.
+    # (página, flow, bloco): a posição serve para encaixar as imagens depois.
     placed: list[tuple[int, float, Block]] = []
     for group in groups:
         kind = _classify(group, body_size)
@@ -648,7 +752,7 @@ def extract_blocks(
         placed.append(
             (
                 group[0].page,
-                group[0].top,
+                group[0].flow,
                 Block(
                     kind=kind,  # type: ignore[arg-type]
                     text=text,
@@ -674,8 +778,9 @@ def _place_images(
 ) -> list[Block]:
     """Intercala blocos de imagem entre os de texto, pela posição na página.
 
-    Cada imagem entra antes do primeiro parágrafo que começa abaixo dela.
-    Imagens repetidas em muitas páginas (logotipos, molduras) são descartadas.
+    Cada imagem entra antes do primeiro parágrafo que vem depois dela na ordem
+    de leitura (flow). Imagens repetidas em muitas páginas (logotipos,
+    molduras) são descartadas.
     """
     pages_by_hash: dict[str, set[int]] = {}
     for image in page_images:
@@ -684,7 +789,7 @@ def _place_images(
 
     kept: list[tuple[int, float, Block]] = []
     names_by_hash: dict[str, str] = {}
-    for image in sorted(page_images, key=lambda i: (i.page, i.top)):
+    for image in sorted(page_images, key=lambda i: (i.page, i.flow, i.top)):
         digest = hashlib.sha1(image.data).hexdigest()
         if len(pages_by_hash[digest]) >= REPEATED_IMAGE_PAGES:
             continue
@@ -694,13 +799,13 @@ def _place_images(
             name = f"pdf-{len(names_by_hash) + 1:03d}.{image.extension}"
             names_by_hash[digest] = name
             images[name] = image.data
-        kept.append((image.page, image.top, Block(kind="image", src=name, page=image.page)))
+        kept.append((image.page, image.flow, Block(kind="image", src=name, page=image.page)))
 
     merged: list[Block] = []
     pending = iter(kept)
     next_image = next(pending, None)
-    for page, top, block in placed:
-        while next_image is not None and (next_image[0], next_image[1]) < (page, top):
+    for page, flow, block in placed:
+        while next_image is not None and (next_image[0], next_image[1]) < (page, flow):
             merged.append(next_image[2])
             next_image = next(pending, None)
         merged.append(block)

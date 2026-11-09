@@ -105,9 +105,23 @@ Erra nos dois sentidos:
 É o erro mais frequente em conversão de livro, e o que a heurística tem menos
 chance de acertar sozinha.
 
-**Duas colunas.** Não tratado. O `pdfminer` faz alguma inferência de ordem de
-leitura pelo parâmetro `boxes_flow`, mas em PDF acadêmico o texto sai
-embaralhado e não há conserto no estado atual.
+**Duas colunas.** Em cada página, `_find_gutter` procura no terço central do
+texto o x que menos linhas atravessam. Se sobram pelo menos 4 linhas e 25% da
+página de cada lado, e no máximo 20% atravessam, é uma calha. A página é lida
+assim:
+
+- coluna esquerda inteira, depois a direita;
+- uma linha que atravessa a calha (título largo, número de página) divide a
+  página em faixas, lidas de cima para baixo;
+- da coluna esquerda para a direita vale a regra da quebra de página: o
+  parágrafo continua se a coluna terminou sem ponto final e a direita começa
+  sem recuo;
+- imagens entram na coluna em que estão.
+
+Página de coluna única mantém a ordem do `pdfminer`, como antes. Poesia e
+diálogos curtos não viram duas colunas porque não têm linhas do lado direito.
+Não tratado: três colunas ou mais, e colunas de larguras muito diferentes
+(uma barra lateral estreita, por exemplo).
 
 **Capitular (drop cap).** A letra grande e decorativa que abre o capítulo
 costuma ser um objeto de texto separado no PDF. Tem boa chance de virar um
@@ -261,8 +275,8 @@ Vale ser claro, porque nem todo problema é problema de IA:
 - **Itálico** — era bug de código, já corrigido: o modelo não pode recuperar
   uma informação que não chegou até ele, então o extrator passou a marcar
   `<em>` e `<strong>` pela fonte de cada caractere.
-- **Duas colunas** — é problema de geometria, não de linguagem. Resolve-se com
-  análise de layout (ou trocando para PyMuPDF), não com prompt.
+- **Duas colunas** — é problema de geometria, não de linguagem. Foi resolvido
+  com análise de layout (a calha entre as colunas), não com prompt.
 - **PDF escaneado** — precisa de OCR. Modelo de texto não lê imagem.
 
 ### Arquitetura recomendada: híbrido

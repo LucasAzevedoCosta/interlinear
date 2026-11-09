@@ -185,7 +185,8 @@ write_epub(doc, "livro.epub")
 
 - **PDFs escaneados não funcionam.** Sem OCR, não há texto para extrair. O app
   avisa em vez de produzir um EPUB vazio.
-- **Layout de duas colunas** sai fora de ordem. PDFs acadêmicos sofrem mais.
+- **Duas colunas** são lidas uma depois da outra. Três colunas ou mais, e
+  colunas de larguras muito diferentes, ainda saem fora de ordem.
 - **Imagens de PDF só em JPEG e bitmap RGB/cinza.** CMYK, paleta, JPEG 2000 e
   JBIG2 são ignorados (as imagens de EPUB são todas preservadas).
 - **Itálico e negrito do PDF dependem do nome da fonte** ("Times-Italic",
