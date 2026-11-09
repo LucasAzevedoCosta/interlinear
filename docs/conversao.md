@@ -191,8 +191,27 @@ repetem em três páginas ou mais (logotipos, molduras).
 "MinionPro-It", "Garamond-BoldIt"). Uma fonte itálica com nome que não diz
 isso passa como texto normal.
 
-**PDF escaneado.** Sem OCR não há texto. O extrator levanta `ValueError` com
-mensagem explícita em vez de produzir um EPUB vazio.
+**PDF escaneado.** Quando o PDF não tem texto nenhum, `core/ocr.py` renderiza
+cada página a 300 dpi com pypdfium2 e passa pelo Tesseract, que devolve hOCR:
+cada linha com posição e uma estimativa do tamanho da letra. Isso vira a mesma
+lista de `Line` de um PDF com texto, e o resto do pipeline (parágrafos,
+títulos, hífen, colunas, notas, tabelas) vale igual.
+
+- A estimativa de tamanho do Tesseract oscila. Tamanhos até 12% longe do mais
+  comum viram o corpo (`BODY_SNAP`), senão cada oscilação partiria o parágrafo.
+- As páginas rodam em paralelo, um Tesseract por núcleo.
+- As imagens do PDF não são extraídas: num escaneado, elas são as próprias
+  páginas.
+- Idiomas em `INTERLINEAR_OCR_LANGS` (padrão `por+eng`); os não instalados são
+  ignorados.
+
+Não detecta itálico nem negrito (o Tesseract 4+ não informa a fonte). Um PDF
+com texto em algumas páginas e outras escaneadas não passa pelo OCR. Sem o
+Tesseract instalado, o extrator levanta `ValueError` explicando o que
+instalar, em vez de produzir um EPUB vazio.
+
+Ficou de fora o `ocrmypdf`, o caminho mais comum: ele depende do Ghostscript,
+que é AGPL (ver `docs/licencas.md`).
 
 ---
 
@@ -320,7 +339,8 @@ Vale ser claro, porque nem todo problema é problema de IA:
   `<em>` e `<strong>` pela fonte de cada caractere.
 - **Duas colunas** — é problema de geometria, não de linguagem. Foi resolvido
   com análise de layout (a calha entre as colunas), não com prompt.
-- **PDF escaneado** — precisa de OCR. Modelo de texto não lê imagem.
+- **PDF escaneado** — precisa de OCR, não de modelo de texto. Resolvido com
+  Tesseract.
 
 ### Arquitetura recomendada: híbrido
 

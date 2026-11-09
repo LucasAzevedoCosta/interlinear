@@ -333,10 +333,10 @@ Em ordem de retorno sobre esforço:
    também para o hífen que as regras não decidem.
 3. **Expor os limiares na interface**, para calibrar por livro sem editar
    código.
-4. **OCR** para PDFs escaneados.
 
-Itálico e negrito na extração, imagens do PDF e o hífen de palavra composta,
-que já estiveram nesta lista, estão feitos.
+Itálico e negrito na extração, imagens do PDF, o hífen de palavra composta,
+duas colunas, notas de rodapé, tabelas e OCR, que já estiveram nesta lista,
+estão feitos.
 
 ---
 

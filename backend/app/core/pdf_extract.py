@@ -848,6 +848,20 @@ def _looks_like_list_item(text: str) -> bool:
     return bool(head) and head[:-1].isalnum() and head[-1:] in (".", ")") and len(head) <= 4
 
 
+def _common_margin(margins: Counter[int]) -> int:
+    """O x mais comum, somando os vizinhos de 1 ponto.
+
+    Sem somar, uma margem em 50,4 e 50,6 (ruído de OCR, coordenadas
+    fracionárias) se divide entre 50 e 51 e pode perder para o recuo de
+    primeira linha. No empate, fica a mais à esquerda: o recuo está à direita
+    da margem, nunca à esquerda.
+    """
+    return max(
+        margins,
+        key=lambda x: (margins[x - 1] + margins[x] + margins[x + 1], -x),
+    )
+
+
 def _group_into_paragraphs(lines: list[Line], body_size: float) -> list[list[Line]]:
     """Agrupa linhas consecutivas em parágrafos.
 
@@ -871,9 +885,7 @@ def _group_into_paragraphs(lines: list[Line], body_size: float) -> list[list[Lin
     left_margins: dict[int, Counter[int]] = {}
     for line in lines:
         left_margins.setdefault(line.column, Counter())[round(line.x0)] += 1
-    body_left = {
-        column: margins.most_common(1)[0][0] for column, margins in left_margins.items()
-    }
+    body_left = {column: _common_margin(margins) for column, margins in left_margins.items()}
 
     groups: list[list[Line]] = [[lines[0]]]
 
@@ -932,8 +944,8 @@ def extract_blocks(
     bytes, pronto para Document.images) e os blocos ganham os kind="image"
     correspondentes. Sem ele, as imagens são ignoradas, como antes.
 
-    Levanta ValueError quando o PDF não tem texto extraível, o que normalmente
-    significa que é um documento escaneado e precisaria de OCR.
+    PDF sem texto (escaneado) passa por OCR, se o Tesseract estiver instalado
+    (ver core/ocr.py). Levanta ValueError quando não há como extrair texto.
     """
     laparams = LAParams(
         line_margin=0.4,
@@ -945,10 +957,9 @@ def extract_blocks(
 
     lines, page_images = _read_lines(pdf_path, laparams, with_images=images is not None)
     if not lines:
-        raise ValueError(
-            "Nenhum texto extraível encontrado. O PDF provavelmente é "
-            "escaneado e precisa passar por OCR antes da conversão."
-        )
+        lines = _ocr_lines(pdf_path)
+        # As imagens de um PDF escaneado são as próprias páginas.
+        page_images = []
 
     lines = _strip_running_heads(lines)
     body_size = _body_size(lines)
@@ -1016,6 +1027,22 @@ def extract_blocks(
             extras.append((note.page, math.inf, block))
 
     return _merge_positioned(placed, extras), title
+
+
+def _ocr_lines(pdf_path: str) -> list[Line]:
+    # Importado aqui: ocr.py importa Line deste módulo.
+    from . import ocr
+
+    if not ocr.available():
+        raise ValueError(
+            "Nenhum texto extraível encontrado. O PDF provavelmente é "
+            "escaneado e precisa de OCR: instale o Tesseract (a imagem Docker "
+            "já traz) e importe de novo."
+        )
+    lines = ocr.read_lines(pdf_path)
+    if not lines:
+        raise ValueError("O OCR não encontrou texto neste PDF.")
+    return lines
 
 
 def _table_block(cells: list[Line]) -> Block:

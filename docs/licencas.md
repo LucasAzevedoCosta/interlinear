@@ -1,6 +1,7 @@
 # Licenças das dependências
 
-Resumo: o Interlinear pode ser MIT porque todas as dependências são MIT ou BSD. Essa
+Resumo: o Interlinear pode ser MIT porque todas as dependências são MIT, BSD ou
+Apache. Essa
 não é a escolha óbvia neste domínio, e vale explicar por quê — para que ninguém
 troque uma biblioteca por outra sem perceber o efeito.
 
@@ -14,6 +15,14 @@ troque uma biblioteca por outra sem perceber o efeito.
 | `uvicorn`        | BSD     | Execução do servidor         |
 | `httpx`          | BSD     | Cliente dos provedores de IA |
 | `python-multipart` | Apache-2.0 | Upload de arquivos     |
+| `pypdfium2`      | Apache-2.0 / BSD-3 | Renderiza páginas para o OCR |
+
+O OCR usa o **Tesseract** (Apache-2.0), chamado como programa externo. Ele é
+opcional fora do Docker: sem ele, só os PDFs escaneados deixam de funcionar.
+
+O caminho mais comum para OCR em Python, o `ocrmypdf` (MPL-2.0), ficou de
+fora porque depende do **Ghostscript**, que é AGPL. É a mesma armadilha
+descrita abaixo, só que escondida numa dependência de sistema.
 
 A escrita de EPUB não usa biblioteca nenhuma: o pacote é montado com o
 `zipfile` da biblioteca padrão. Foi decisão consciente, pelos dois motivos

@@ -26,7 +26,8 @@ exportação, então o que aparece na tela é exatamente o que vai para o arquiv
 
 ## O que ele faz
 
-- **Importa** PDFs com texto nativo e EPUBs existentes
+- **Importa** PDFs com texto nativo, PDFs escaneados (OCR com Tesseract) e
+  EPUBs existentes
 - **Reconstrói** capítulos, títulos e parágrafos a partir das pistas
   tipográficas do PDF (tamanho de fonte, recuo, espaçamento), descartando
   cabeçalhos correntes e números de página
@@ -59,6 +60,13 @@ source .venv/bin/activate        # no Windows: .venv\Scripts\activate
 
 pip install -r requirements.txt
 ```
+
+Para importar PDFs escaneados, instale também o
+[Tesseract](https://tesseract-ocr.github.io/) com os idiomas dos seus livros
+(`brew install tesseract tesseract-lang` no Mac,
+`apt install tesseract-ocr tesseract-ocr-por` no Debian/Ubuntu). Sem ele, o
+resto funciona e o app avisa ao receber um PDF sem texto. A imagem Docker já
+traz o Tesseract com português e inglês.
 
 ## Como usar
 
@@ -133,6 +141,8 @@ execução direta.
 | `INTERLINEAR_OLLAMA_URL`    | Endereço padrão do Ollama                         |
 | `INTERLINEAR_LMSTUDIO_URL`  | Endereço padrão do LM Studio                      |
 | `INTERLINEAR_LOG_LEVEL`     | `DEBUG` para ver o que o extrator decidiu         |
+| `INTERLINEAR_OCR_LANGS`     | Idiomas do OCR (padrão `por+eng`; só os instalados valem) |
+| `INTERLINEAR_TESSERACT`     | Caminho do Tesseract, se não estiver no `PATH`    |
 
 Usar as variáveis de ambiente evita gravar chave nenhuma em disco.
 
@@ -183,8 +193,10 @@ write_epub(doc, "livro.epub")
 
 ## Limitações conhecidas
 
-- **PDFs escaneados não funcionam.** Sem OCR, não há texto para extrair. O app
-  avisa em vez de produzir um EPUB vazio.
+- **PDFs escaneados** passam por OCR, que leva cerca de 1 segundo por página
+  por núcleo (um livro de 300 páginas, perto de 1 minuto num computador de 4
+  a 8 núcleos) e não detecta itálico nem negrito. Só PDFs inteiramente sem
+  texto: um PDF com texto em parte das páginas não passa pelo OCR.
 - **Duas colunas** são lidas uma depois da outra. Três colunas ou mais, e
   colunas de larguras muito diferentes, ainda saem fora de ordem.
 - **Imagens de PDF só em JPEG e bitmap RGB/cinza.** CMYK, paleta, JPEG 2000 e

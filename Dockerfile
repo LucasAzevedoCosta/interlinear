@@ -11,6 +11,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Tesseract para o OCR de PDFs escaneados (Apache-2.0), com português; o
+# inglês vem junto. Outros idiomas: tesseract-ocr-<código> e
+# INTERLINEAR_OCR_LANGS (docs/conversao.md).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-por \
+    && rm -rf /var/lib/apt/lists/*
+
 # Dependências primeiro: a camada só é refeita quando requirements.txt muda.
 COPY requirements.txt .
 RUN pip install -r requirements.txt
