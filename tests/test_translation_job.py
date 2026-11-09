@@ -137,6 +137,28 @@ def test_edicoes_durante_a_traducao_sobrevivem(client, provider):
     assert blocks[ids[3]].translated == "[pt] Paragraph 4."
 
 
+def test_tarefa_so_termina_depois_de_gravar(client, provider, monkeypatch):
+    """Quem vê "done" e recarrega o projeto precisa encontrar a tradução no disco.
+
+    A gravação final é atrasada de propósito: antes da correção, o status
+    virava "done" antes dela, e o CI pegou essa janela por acaso.
+    """
+    project_id, ids = _new_project()
+    store = get_store()
+    original = store.update
+
+    def slow_update(*args, **kwargs):
+        time.sleep(0.3)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(store, "update", slow_update)
+    job_id = _start(client, project_id)
+
+    assert _wait_job(client, job_id)["status"] == "done"
+    blocks = store.load_document(project_id).block_index()
+    assert [blocks[i].translated for i in ids] == [f"[pt] Paragraph {n}." for n in range(1, 5)]
+
+
 def test_apagar_projeto_durante_a_traducao_nao_recria_a_pasta(client, provider):
     project_id, _ = _new_project()
     provider.gate.clear()

@@ -282,6 +282,7 @@ async def start_translation(
                     log.info("Projeto %s apagado durante a tradução", project_id)
                     job.request_stop()
 
+        status = "error"
         try:
             async with Translator(provider, translation_settings) as translator:
                 await translator.translate_blocks(
@@ -289,26 +290,27 @@ async def start_translation(
                     on_progress=on_progress,
                     should_stop=lambda: job.should_stop,
                 )
-            job.status = "stopped" if job.should_stop else "done"
+            status = "stopped" if job.should_stop else "done"
         except ProviderError as exc:
-            job.status = "error"
             job.error = str(exc)
             log.error("Tradução falhou no projeto %s: %s", project_id, exc)
         except asyncio.CancelledError:
-            job.status = "stopped"
+            status = "stopped"
             raise
         except Exception as exc:  # noqa: BLE001
-            job.status = "error"
             job.error = f"Erro inesperado: {exc}"
             log.exception("Tradução falhou no projeto %s", project_id)
         finally:
             import time
 
-            job.finished_at = time.time()
             try:
                 await asyncio.to_thread(persist)
             except FileNotFoundError:
                 log.info("Projeto %s apagado durante a tradução", project_id)
+            # Só depois de gravar: quem vê a tarefa terminada e recarrega o
+            # projeto (o frontend faz isso) precisa encontrar tudo no disco.
+            job.finished_at = time.time()
+            job.status = status
 
     job._task = asyncio.create_task(run())
 
