@@ -10,12 +10,14 @@ O pipeline:
        são lidas uma depois da outra)
     2. descartar cabeçalhos, rodapés e números de página repetidos
     3. estabelecer o tamanho de fonte do corpo (mediana ponderada)
-    4. agrupar linhas em parágrafos por espaçamento e recuo
-    5. classificar cada parágrafo como título ou corpo
-    6. encaixar as imagens entre os parágrafos pela posição na página
+    4. separar as notas de rodapé (corpo menor, no pé da página)
+    5. agrupar linhas em parágrafos por espaçamento e recuo
+    6. classificar cada parágrafo como título ou corpo
+    7. encaixar imagens e notas entre os parágrafos pela posição na página
 
-Itálico e negrito vêm da fonte de cada caractere e viram <em> e <strong> no
-texto do bloco, o mesmo formato que o leitor de EPUB produz.
+Itálico, negrito e sobrescrito vêm da fonte e da posição de cada caractere e
+viram <em>, <strong> e <sup> no texto do bloco, o mesmo formato que o leitor
+de EPUB produz.
 
 Usamos pdfminer.six (licença MIT) para manter o projeto sob licença permissiva.
 Há um backend alternativo com PyMuPDF, mais rápido e preciso, mas AGPL — veja
@@ -27,6 +29,7 @@ from __future__ import annotations
 import bisect
 import hashlib
 import logging
+import math
 import re
 import statistics
 import struct
@@ -92,7 +95,16 @@ _LOSSLESS_FILTERS = frozenset(
     + LITERALS_RUNLENGTH_DECODE
 )
 
-# Um caractere com seu estilo: "", "b", "i" ou "bi".
+# Caractere sobrescrito: menor que este tanto do corpo da linha, e elevado.
+SUPERSCRIPT_RATIO = 0.85
+
+# Notas de rodapé: linhas pelo menos 10% menores que o corpo, abaixo de todo o
+# texto normal da página, na metade de baixo, começando por um marcador.
+FOOTNOTE_RATIO = 0.90
+_FOOTNOTE_MARKER = re.compile(r"^(\d{1,3}|[*†‡§]{1,3})(?=[\s.)\]]|[^\W\d])")
+
+# Um caractere com seu estilo: combinação de "b" (negrito), "i" (itálico) e
+# "s" (sobrescrito), ou "" para texto normal.
 StyledChar = tuple[str, str]
 
 
@@ -159,13 +171,29 @@ def _styled_line(text_line: LTTextLine) -> list[StyledChar]:
 
     Espaços e hífens invisíveis são tratados aqui, e não depois, para que o
     texto e os estilos continuem alinhados caractere a caractere.
+
+    Caractere menor que o da linha e acima da base dela é sobrescrito ("s"):
+    a chamada de nota de rodapé ("palavra¹") e ordinais ("1º").
     """
+    letters = [item for item in text_line if isinstance(item, LTChar)]
+    sizes = [round(item.size, 1) for item in letters]
+    main = statistics.mode(sizes) if sizes else 0.0
+    baseline = min(
+        (item.y0 for item in letters if round(item.size, 1) == main), default=0.0
+    )
+
     chars: list[StyledChar] = []
     style = ""
     for item in text_line:
         text = item.get_text()
         if isinstance(item, LTChar):
             style = _char_style(item.fontname)
+            if (
+                item.size < main * SUPERSCRIPT_RATIO
+                and item.y0 > baseline + main * 0.2
+                and text.strip()
+            ):
+                style += "s"
         for char in text:
             if char == "­":  # hífen invisível de quebra
                 continue
@@ -226,8 +254,8 @@ def _first_word(chars: list[StyledChar]) -> str:
     return "".join(word)
 
 
-_OPEN = {"b": "<strong>", "i": "<em>"}
-_CLOSE = {"b": "</strong>", "i": "</em>"}
+_OPEN = {"b": "<strong>", "i": "<em>", "s": "<sup>"}
+_CLOSE = {"b": "</strong>", "i": "</em>", "s": "</sup>"}
 
 
 def _render_styled(chars: list[StyledChar]) -> str:
@@ -253,7 +281,7 @@ def _render_styled(chars: list[StyledChar]) -> str:
     previous = None
     while previous != text:
         previous = text
-        text = re.sub(r" ((?:</em>|</strong>)+)", r"\1 ", text)
+        text = re.sub(r" ((?:</em>|</strong>|</sup>)+)", r"\1 ", text)
     return text
 
 
@@ -450,7 +478,7 @@ def _reading_order(lines: list[Line], images: list[PageImage]) -> list[Line]:
     coluna única a ordem do pdfminer é mantida, como sempre foi.
 
     As imagens ganham um flow entre o das linhas, para entrarem no lugar certo
-    em _place_images.
+    em _merge_positioned.
     """
     gutter = _find_gutter(lines)
 
@@ -549,6 +577,80 @@ def _is_bare_page_number(line: Line) -> bool:
 
 def _is_roman(text: str) -> bool:
     return bool(text) and all(c in "ivxlcdmIVXLCDM" for c in text)
+
+
+@dataclass
+class Footnote:
+    """Uma nota de rodapé: o marcador ("1", "*") e as linhas do texto."""
+
+    page: int
+    marker: str
+    lines: list[Line]
+
+
+def _split_footnotes(
+    lines: list[Line], body_size: float
+) -> tuple[list[Line], list[Footnote]]:
+    """Separa as notas de rodapé do corpo do texto.
+
+    Em cada página, a zona de notas é o conjunto de linhas em fonte menor que
+    ficam abaixo de toda linha em fonte normal, na metade de baixo da página.
+    Só vale se a primeira linha da zona começa com um marcador ("1", "*", "†"):
+    sem isso pode ser uma legenda ou um texto em corpo menor. Cada linha com
+    marcador abre uma nota; as outras continuam a anterior.
+
+    Tirar as notas antes de agrupar os parágrafos também conserta o parágrafo
+    que atravessa a página, que antes era partido por elas.
+    """
+    limit = body_size * FOOTNOTE_RATIO
+    by_page: dict[int, list[Line]] = {}
+    for line in lines:
+        by_page.setdefault(line.page, []).append(line)
+
+    notes: list[Footnote] = []
+    in_notes: set[int] = set()
+    for page, page_lines in by_page.items():
+        normal = [line for line in page_lines if line.size > limit]
+        if not normal:
+            continue  # página toda em corpo menor: apêndice, não nota
+        floor = max(line.top for line in normal)
+        zone = [line for line in page_lines if line.size <= limit and line.top > floor]
+        if not zone or zone[0].top / zone[0].page_height < 0.5:
+            continue
+        zone.sort(key=lambda line: (line.top, line.x0))
+        if not _FOOTNOTE_MARKER.match(zone[0].text):
+            continue
+
+        for line in zone:
+            match = _FOOTNOTE_MARKER.match(line.text)
+            if match:
+                notes.append(Footnote(page=page, marker=match.group(1), lines=[line]))
+            else:
+                notes[-1].lines.append(line)
+            in_notes.add(id(line))
+
+    if notes:
+        log.info("Encontradas %d notas de rodapé", len(notes))
+    return [line for line in lines if id(line) not in in_notes], notes
+
+
+def _footnote_block(note: Footnote, vocabulary: Vocabulary) -> Block | None:
+    chars: list[StyledChar] = []
+    for line in note.lines:
+        chars = _join_styled(chars, line.chars, vocabulary)
+    # Tira o marcador, que vai para meta, e a pontuação logo depois dele.
+    chars = chars[len(note.marker) :]
+    while chars and (chars[0][0] in " .)]"):
+        chars = chars[1:]
+    text = normalize_spaces(_render_styled(chars))
+    if not text:
+        return None
+    return Block(
+        kind="footnote",
+        text=text,
+        page=note.page,
+        meta={"marker": note.marker, "size": note.lines[0].size},
+    )
 
 
 def _body_size(lines: list[Line]) -> float:
@@ -719,12 +821,14 @@ def extract_blocks(
     body_size = _body_size(lines)
     log.info("Tamanho de fonte do corpo detectado: %.1f", body_size)
 
-    groups = _group_into_paragraphs(lines, body_size)
     # Palavras como o livro as escreve no meio das linhas: decide se o hífen
     # de "guarda-" no fim de uma linha é de quebra ou da palavra.
     vocabulary = Vocabulary.from_texts(line.text for line in lines)
+    lines, footnotes = _split_footnotes(lines, body_size)
 
-    # (página, flow, bloco): a posição serve para encaixar as imagens depois.
+    groups = _group_into_paragraphs(lines, body_size)
+
+    # (página, flow, bloco): a posição serve para encaixar imagens e notas depois.
     placed: list[tuple[int, float, Block]] = []
     for group in groups:
         kind = _classify(group, body_size)
@@ -762,25 +866,27 @@ def extract_blocks(
             )
         )
 
-    blocks = [block for _, _, block in placed]
-    title = _guess_title(blocks, source_name or pdf_path)
+    title = _guess_title([block for _, _, block in placed], source_name or pdf_path)
 
+    extras: list[tuple[int, float, Block]] = []
     if images is not None and page_images:
-        blocks = _place_images(placed, page_images, images)
+        extras.extend(_image_blocks(page_images, images))
+    for note in footnotes:
+        block = _footnote_block(note, vocabulary)
+        if block:
+            # Depois do texto da página: entra após o parágrafo em que a
+            # página termina, mesmo que ele continue na seguinte.
+            extras.append((note.page, math.inf, block))
 
-    return blocks, title
+    return _merge_positioned(placed, extras), title
 
 
-def _place_images(
-    placed: list[tuple[int, float, Block]],
-    page_images: list[PageImage],
-    images: dict[str, bytes],
-) -> list[Block]:
-    """Intercala blocos de imagem entre os de texto, pela posição na página.
+def _image_blocks(
+    page_images: list[PageImage], images: dict[str, bytes]
+) -> list[tuple[int, float, Block]]:
+    """Blocos de imagem com sua posição (página, flow), e os bytes em `images`.
 
-    Cada imagem entra antes do primeiro parágrafo que vem depois dela na ordem
-    de leitura (flow). Imagens repetidas em muitas páginas (logotipos,
-    molduras) são descartadas.
+    Imagens repetidas em muitas páginas (logotipos, molduras) são descartadas.
     """
     pages_by_hash: dict[str, set[int]] = {}
     for image in page_images:
@@ -801,20 +907,31 @@ def _place_images(
             images[name] = image.data
         kept.append((image.page, image.flow, Block(kind="image", src=name, page=image.page)))
 
-    merged: list[Block] = []
-    pending = iter(kept)
-    next_image = next(pending, None)
-    for page, flow, block in placed:
-        while next_image is not None and (next_image[0], next_image[1]) < (page, flow):
-            merged.append(next_image[2])
-            next_image = next(pending, None)
-        merged.append(block)
-    while next_image is not None:
-        merged.append(next_image[2])
-        next_image = next(pending, None)
-
     if kept:
         log.info("Extraídas %d imagens do PDF", len(kept))
+    return kept
+
+
+def _merge_positioned(
+    placed: list[tuple[int, float, Block]],
+    extras: list[tuple[int, float, Block]],
+) -> list[Block]:
+    """Intercala imagens e notas entre os blocos de texto, pela posição.
+
+    Cada extra entra antes do primeiro parágrafo que começa depois dele na
+    ordem de leitura (página, flow).
+    """
+    merged: list[Block] = []
+    pending = iter(sorted(extras, key=lambda extra: (extra[0], extra[1])))
+    upcoming = next(pending, None)
+    for page, flow, block in placed:
+        while upcoming is not None and (upcoming[0], upcoming[1]) < (page, flow):
+            merged.append(upcoming[2])
+            upcoming = next(pending, None)
+        merged.append(block)
+    while upcoming is not None:
+        merged.append(upcoming[2])
+        upcoming = next(pending, None)
     return merged
 
 

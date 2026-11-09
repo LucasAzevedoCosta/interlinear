@@ -352,6 +352,8 @@ button {
 .block[data-kind="heading3"] .block__field { font-size: 17px; font-weight: 600; }
 .block[data-kind="quote"] .block__field { font-style: italic; padding-left: 14px; border-left: 2px solid #ddd9d2; }
 .block[data-kind="list_item"] .block__field { padding-left: 14px; }
+.block[data-kind="footnote"] .block__field,
+.block[data-kind="footnote"] .block__source { font-size: 0.88em; }
 
 .block__tools {
   display: flex;

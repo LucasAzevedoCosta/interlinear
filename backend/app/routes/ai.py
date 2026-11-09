@@ -14,7 +14,7 @@ from ..ai.base import Message, ProviderConfig, ProviderError
 from ..ai.providers import PROVIDER_CATALOG, build_provider
 from ..ai.translator import Progress, TranslationSettings, Translator
 from ..config import ProviderProfile, Settings
-from ..core.blocks import Block, Document
+from ..core.blocks import TRANSLATABLE, Block, Document
 from ..deps import get_settings_store, get_store
 from ..jobs import registry
 
@@ -214,9 +214,7 @@ async def start_translation(
         if chapter_ids and chapter.id not in chapter_ids:
             continue
         for block in chapter.blocks:
-            if block.kind not in {
-                "heading1", "heading2", "heading3", "paragraph", "quote", "list_item",
-            }:
+            if block.kind not in TRANSLATABLE:
                 continue
             if not block.text.strip():
                 continue

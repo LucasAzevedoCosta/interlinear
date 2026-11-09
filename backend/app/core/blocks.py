@@ -19,13 +19,17 @@ BlockKind = Literal[
     "paragraph",
     "quote",
     "list_item",
+    # Nota de rodapé. O marcador ("1", "*") fica em meta["marker"] e a chamada
+    # no texto é um <sup> com o mesmo marcador. No EPUB vai para o fim do
+    # capítulo; no editor, fica logo depois do parágrafo da página dela.
+    "footnote",
     "image",
     "page_break",
 ]
 
 # Tipos cujo texto faz sentido traduzir.
 TRANSLATABLE: frozenset[str] = frozenset(
-    {"heading1", "heading2", "heading3", "paragraph", "quote", "list_item"}
+    {"heading1", "heading2", "heading3", "paragraph", "quote", "list_item", "footnote"}
 )
 
 

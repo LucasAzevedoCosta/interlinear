@@ -87,6 +87,12 @@ p.image {
 
 p.image + p { text-indent: 0; }
 
+section.footnotes {
+  margin-top: 2em;
+  border-top: 1px solid currentColor;
+  font-size: 0.85em;
+}
+section.footnotes p { text-indent: 0; margin: 0.5em 0; }
 hr.page-break {
   border: 0;
   page-break-after: always;
@@ -162,6 +168,53 @@ def _block_to_xhtml(block: Block, *, use_translation: bool) -> str:
     return f"<p{anchor}>{body}</p>"
 
 
+_NOTE_CALL = re.compile(r"<sup>([^<>]{1,6})</sup>")
+
+
+def _link_note_calls(fragment: str, pending: list[Block], linked: set[str]) -> str:
+    """Liga cada <sup>1</sup> do texto à primeira nota pendente com marcador 1.
+
+    Os marcadores se repetem (muitos livros recomeçam do 1 a cada página), por
+    isso cada chamada consome a nota mais antiga ainda não ligada, na ordem do
+    capítulo. Um <sup> sem nota correspondente (um ordinal, "1º") fica como está.
+    """
+
+    def link(match: re.Match[str]) -> str:
+        marker = match.group(1).strip()
+        for note in pending:
+            if str(note.meta.get("marker", "")) == marker:
+                pending.remove(note)
+                linked.add(note.id)
+                return (
+                    f'<sup><a epub:type="noteref" id="r{note.id}" '
+                    f'href="#n{note.id}">{match.group(1)}</a></sup>'
+                )
+        return match.group(0)
+
+    return _NOTE_CALL.sub(link, fragment)
+
+
+def _footnotes_xhtml(notes: list[Block], linked: set[str], *, use_translation: bool) -> str:
+    """As notas do capítulo, no fim dele, como <aside epub:type="footnote">.
+
+    Leitores com suporte (Apple Books, Kobo, KOReader) mostram a nota numa
+    janela ao tocar na chamada; os outros mostram a seção no fim do capítulo,
+    com link de volta para o texto.
+    """
+    items: list[str] = []
+    for note in notes:
+        text = note.display_text if use_translation else note.text
+        marker = html.escape(str(note.meta.get("marker", "")))
+        if note.id in linked:
+            marker = f'<a href="#r{note.id}">{marker}</a>'
+        label = f'<span class="note-marker">{marker}</span> ' if marker else ""
+        items.append(
+            f'<aside epub:type="footnote" class="footnote" id="n{note.id}">'
+            f"<p>{label}{inline_html(text)}</p></aside>"
+        )
+    return '<section class="footnotes" epub:type="footnotes">\n' + "\n".join(items) + "\n</section>"
+
+
 def chapter_to_xhtml(
     chapter: Chapter,
     *,
@@ -176,11 +229,23 @@ def chapter_to_xhtml(
     """
     parts: list[str] = []
     in_list = False
+    notes = [
+        block
+        for block in chapter.blocks
+        if block.kind == "footnote"
+        and (block.display_text if use_translation else block.text).strip()
+    ]
+    pending = list(notes)
+    linked: set[str] = set()
 
     for block in chapter.blocks:
+        if block.kind == "footnote":
+            continue
         fragment = _block_to_xhtml(block, use_translation=use_translation)
         if not fragment:
             continue
+        if pending:
+            fragment = _link_note_calls(fragment, pending, linked)
 
         is_item = block.kind == "list_item"
         if is_item and not in_list:
@@ -194,6 +259,8 @@ def chapter_to_xhtml(
 
     if in_list:
         parts.append("</ul>")
+    if notes:
+        parts.append(_footnotes_xhtml(notes, linked, use_translation=use_translation))
 
     body = "\n".join(parts)
     title = html.escape(chapter.title or "", quote=True)

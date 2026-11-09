@@ -134,8 +134,27 @@ vira um capítulo único. Existe um fallback em `structure.split_into_chapters`
 que desce de `heading1` para `heading2` e `heading3`, mas se não há título de
 nível nenhum, não há o que fazer automaticamente.
 
-**Notas de rodapé e tabelas.** Notas entram como parágrafos comuns no corpo.
-Tabelas viram parágrafos soltos.
+**Notas de rodapé.** `_split_footnotes` procura, em cada página, linhas pelo
+menos 10% menores que o corpo, abaixo de todo o texto normal e na metade de
+baixo da página. A primeira precisa começar com um marcador (`1`, `*`, `†`,
+`‡`, `§`); sem ele, é legenda ou texto em corpo menor e fica como parágrafo.
+Cada linha com marcador abre uma nota, as outras continuam a anterior.
+
+- A chamada no texto (caractere menor e acima da linha) vira `<sup>1</sup>`.
+- A nota vira um bloco `footnote` com o marcador em `meta.marker`, logo depois
+  do parágrafo em que a página termina, e é traduzida como os outros.
+- No EPUB, as notas do capítulo vão para o fim dele como
+  `<aside epub:type="footnote">`, e cada `<sup>1</sup>` vira um link
+  `epub:type="noteref"` para a primeira nota "1" ainda não ligada. Leitores
+  com suporte abrem a nota numa janela.
+- Tirar as notas antes de agrupar os parágrafos conserta o parágrafo que
+  atravessa a página, que antes era partido por elas.
+
+Não tratado: notas sem marcador, notas no pé de uma só coluna em página de
+duas colunas, e notas de fim de livro (que já vêm como texto normal num
+capítulo "Notas"). EPUBs importados não convertem as notas deles.
+
+**Tabelas.** Viram parágrafos soltos.
 
 **Imagens só nos formatos comuns.** Fotos em JPEG e bitmaps de 8 bits em RGB ou
 tons de cinza são extraídos e encaixados entre os parágrafos pela posição na

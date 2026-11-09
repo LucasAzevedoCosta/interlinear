@@ -230,7 +230,7 @@ function currentChapter() {
 
 const MARKS = {
   heading1: 'H1', heading2: 'H2', heading3: 'H3',
-  paragraph: '¶', quote: '❝', list_item: '•',
+  paragraph: '¶', quote: '❝', list_item: '•', footnote: '†',
   image: '▣', page_break: '⎯',
 };
 
@@ -269,7 +269,9 @@ function renderEditor() {
   });
 }
 
-const TEXT_KINDS = new Set(['heading1', 'heading2', 'heading3', 'paragraph', 'quote', 'list_item']);
+const TEXT_KINDS = new Set([
+  'heading1', 'heading2', 'heading3', 'paragraph', 'quote', 'list_item', 'footnote',
+]);
 
 // Mesma regra do inline_html do backend: escapa tudo e reabilita só as tags de
 // ênfase, para o original mostrar itálico e negrito em vez de "<em>".
@@ -302,6 +304,11 @@ function renderBlock(block, next) {
   mark.className = 'block__mark';
   mark.textContent = MARKS[block.kind] || '¶';
   mark.title = block.page ? `Página ${block.page} do original` : '';
+  if (block.kind === 'footnote') {
+    // A nota mostra o próprio marcador ("1", "*"), que liga ela à chamada no texto.
+    mark.textContent = block.meta?.marker || MARKS.footnote;
+    mark.title = `Nota de rodapé${mark.title ? ` · ${mark.title}` : ''}`;
+  }
   wrapper.append(mark);
 
   if (block.kind === 'image') {

@@ -191,7 +191,9 @@ write_epub(doc, "livro.epub")
   JBIG2 são ignorados (as imagens de EPUB são todas preservadas).
 - **Itálico e negrito do PDF dependem do nome da fonte** ("Times-Italic",
   "MinionPro-It"). Uma fonte itálica com nome genérico passa como texto normal.
-- **Notas de rodapé** entram como parágrafos comuns.
+- **Notas de rodapé** são reconhecidas pelo corpo menor no pé da página e
+  por um marcador ("1", "*", "†"). Notas sem marcador, ou no pé de uma só
+  coluna em página de duas colunas, ainda entram como parágrafos.
 - **Tabelas** viram parágrafos soltos.
 
 A lista completa, com a explicação de por que a conversão de PDF é um problema
