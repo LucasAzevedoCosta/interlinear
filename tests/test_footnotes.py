@@ -127,6 +127,33 @@ def test_texto_pequeno_sem_marcador_nao_vira_nota(blocks):
     assert caption.kind == "paragraph"
 
 
+def test_nota_que_continua_na_pagina_seguinte(tmp_path):
+    path = tmp_path / "continua.pdf"
+    c = canvas.Canvas(str(path), pagesize=A5)
+    filler = "e o relojoeiro seguiu trabalhando na bancada sem dizer"
+    _line(c, HEIGHT - 60, [("O pêndulo", False), ("1", True), (" parou,", False)], indent=True)
+    for i in range(4):
+        _line(c, HEIGHT - 74 - i * 14, [(filler, False)])
+    _note(c, 60, "1", " Começo de uma nota longa que não cabe")
+    c.showPage()
+    for i in range(4):
+        _line(c, HEIGHT - 60 - i * 14, [(filler, False)])
+    _line(c, HEIGHT - 116, [("nada. E a menina", False), ("2", True), (" voltou.", False)])
+    _note_line(c, 80, "no pé da página e termina aqui.")
+    _note(c, 66, "2", " Outra nota.")
+    c.showPage()
+    c.save()
+
+    found, _ = extract_blocks(str(path))
+
+    notes = _notes(found)
+    assert [(n.meta["marker"], n.text) for n in notes] == [
+        ("1", "Começo de uma nota longa que não cabe no pé da página e termina aqui."),
+        ("2", "Outra nota."),
+    ]
+    assert not any("termina aqui" in b.text for b in found if b.kind != "footnote")
+
+
 def test_nota_e_traduzivel():
     assert "footnote" in TRANSLATABLE
 

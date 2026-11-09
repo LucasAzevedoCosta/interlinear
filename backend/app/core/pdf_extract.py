@@ -103,6 +103,10 @@ SUPERSCRIPT_RATIO = 0.85
 FOOTNOTE_RATIO = 0.90
 _FOOTNOTE_MARKER = re.compile(r"^(\d{1,3}|[*†‡§]{1,3})(?=[\s.)\]]|[^\W\d])")
 
+# Fim de frase: entre páginas e colunas, o parágrafo (ou a nota) só continua
+# se a linha anterior não terminou assim.
+_SENTENCE_END = (".", "!", "?", '"', "”", "»")
+
 # Um caractere com seu estilo: combinação de "b" (negrito), "i" (itálico) e
 # "s" (sobrescrito), ou "" para texto normal.
 StyledChar = tuple[str, str]
@@ -596,8 +600,9 @@ def _split_footnotes(
     Em cada página, a zona de notas é o conjunto de linhas em fonte menor que
     ficam abaixo de toda linha em fonte normal, na metade de baixo da página.
     Só vale se a primeira linha da zona começa com um marcador ("1", "*", "†"):
-    sem isso pode ser uma legenda ou um texto em corpo menor. Cada linha com
-    marcador abre uma nota; as outras continuam a anterior.
+    sem isso pode ser uma legenda ou um texto em corpo menor. A exceção é a
+    nota que continua do pé da página anterior. Cada linha com marcador abre
+    uma nota; as outras continuam a anterior.
 
     Tirar as notas antes de agrupar os parágrafos também conserta o parágrafo
     que atravessa a página, que antes era partido por elas.
@@ -619,7 +624,16 @@ def _split_footnotes(
             continue
         zone.sort(key=lambda line: (line.top, line.x0))
         if not _FOOTNOTE_MARKER.match(zone[0].text):
-            continue
+            # Sem marcador, só vale como continuação de uma nota que ficou
+            # sem ponto final no pé da página anterior.
+            if not (
+                notes
+                and notes[-1].page == page - 1
+                and not notes[-1].lines[-1].text.rstrip().endswith(_SENTENCE_END)
+            ):
+                continue
+            if not any(_FOOTNOTE_MARKER.match(line.text) for line in zone) and len(zone) > 3:
+                continue  # bloco grande sem marcador nenhum: não é resto de nota
 
         for line in zone:
             match = _FOOTNOTE_MARKER.match(line.text)
@@ -755,7 +769,7 @@ def _group_into_paragraphs(lines: list[Line], body_size: float) -> list[list[Lin
             # Páginas diferentes só quebram o parágrafo se a linha anterior
             # terminou uma frase; livros quebram parágrafos entre páginas. O
             # mesmo vale da coluna esquerda para a direita.
-            split = previous.text.rstrip().endswith((".", "!", "?", '"', "”", "»"))
+            split = previous.text.rstrip().endswith(_SENTENCE_END)
             if not split and current.column == 1:
                 # Recuo no topo da coluna direita: parágrafo novo.
                 split = current.x0 > body_left[1] + body_size * 0.8
