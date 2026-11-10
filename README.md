@@ -78,7 +78,9 @@ python -m uvicorn app.main:app --port 8000
 Abra `http://127.0.0.1:8000`. O servidor escuta só em `127.0.0.1`, ou seja,
 nada responde na rede local.
 
-1. Arraste um PDF ou EPUB para a área de importação
+1. Arraste um PDF ou EPUB para a área de importação, confira as opções
+   (título, onde começam os capítulos, OCR) e acompanhe o progresso. No fim,
+   um resumo mostra o que foi encontrado e o que vale conferir
 2. Em **Configurações**, adicione um provedor de IA e cole sua chave
 3. Abra o livro e clique em **Traduzir**
 4. Revise os parágrafos no painel central, conferindo na prévia à direita
@@ -163,7 +165,9 @@ diálogo com travessão — e confere o caminho completo até o EPUB e de volta.
 backend/app/
   core/            nada aqui sabe que existe uma web ou uma IA
     blocks.py      estrutura de dados comum a tudo
+    importer.py    arquivo enviado → documento, com progresso e resumo
     pdf_extract.py PDF → blocos, via pistas tipográficas
+    ocr.py         páginas escaneadas → linhas, via Tesseract
     structure.py   blocos → capítulos
     epub_write.py  capítulos → EPUB 3
     epub_read.py   EPUB → blocos
@@ -172,6 +176,7 @@ backend/app/
     base.py        interface comum, retentativa com espera exponencial
     providers.py   OpenAI, Anthropic, Google, Ollama, LM Studio
     translator.py  lotes, glossário, contexto, verificação de formato
+  jobs.py          tarefas em segundo plano: importação e tradução
   routes/          HTTP
 frontend/          JavaScript puro, sem build
 ```

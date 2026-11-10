@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import tempfile
+import re
 from pathlib import Path
 from typing import Any, Callable, TypeVar
 
@@ -19,9 +19,8 @@ from ..core.blocks import (
     Vocabulary,
     join_hyphenated,
 )
-from ..core.epub_read import read_epub
 from ..core.epub_write import DEFAULT_CSS, chapter_to_xhtml, write_epub
-from ..core.pdf_extract import extract_blocks
+from ..core.importer import ImportOptions, import_file
 from ..core.storage import ProjectStore
 from ..deps import get_store
 from ..jobs import registry
@@ -44,9 +43,42 @@ async def create_project(
     file: UploadFile = File(...),
     split_on: str = Form("heading1"),
     title: str = Form(""),
+    ocr_mode: str = Form("auto"),
+    ocr_languages: str = Form(""),
 ) -> dict[str, Any]:
-    """Importa um PDF ou EPUB e cria um projeto editável."""
-    store = get_store()
+    """Importa um PDF ou EPUB de uma vez e cria um projeto editável.
+
+    A interface usa POST /api/imports, que faz o mesmo em segundo plano e
+    mostra o progresso. Esta rota fica para scripts.
+    """
+    data, suffix, filename = await read_upload(file)
+    options = import_options(title, split_on, ocr_mode, ocr_languages)
+
+    # Extrair um PDF leva de segundos a minutos de CPU. Fora do loop de eventos,
+    # para que traduções em andamento e o resto da interface continuem respondendo.
+    try:
+        document, summary = await asyncio.to_thread(
+            import_file, data, suffix, filename, options
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - arquivos de terceiros
+        log.exception("Falha ao importar %s", filename)
+        raise HTTPException(500, f"Não foi possível ler o arquivo: {exc}") from exc
+
+    meta = await asyncio.to_thread(
+        get_store().create,
+        document,
+        source_kind=suffix.lstrip("."),
+        source_filename=filename,
+        source_bytes=data,
+        import_summary=summary,
+    )
+    return {"project": meta.to_dict()}
+
+
+async def read_upload(file: UploadFile) -> tuple[bytes, str, str]:
+    """Lê o arquivo enviado e confere tipo e tamanho. Devolve (bytes, sufixo, nome)."""
     filename = Path(file.filename or "arquivo").name
     suffix = Path(filename).suffix.lower()
 
@@ -58,51 +90,29 @@ async def create_project(
         raise HTTPException(400, "Arquivo vazio")
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, "Arquivo acima do limite de 200 MB")
+    return data, suffix, filename
 
-    # Extrair um PDF leva de segundos a minutos de CPU. Fora do loop de eventos,
-    # para que traduções em andamento e o resto da interface continuem respondendo.
-    try:
-        document = await asyncio.to_thread(
-            _read_source, data, suffix, filename, title, split_on
-        )
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001 - arquivos de terceiros
-        log.exception("Falha ao importar %s", filename)
-        raise HTTPException(500, f"Não foi possível ler o arquivo: {exc}") from exc
 
-    meta = await asyncio.to_thread(
-        store.create,
-        document,
-        source_kind=suffix.lstrip("."),
-        source_filename=filename,
-        source_bytes=data,
+_LANGUAGE_SPEC = re.compile(r"^[A-Za-z_]+(\+[A-Za-z_]+)*$")
+
+
+def import_options(
+    title: str, split_on: str, ocr_mode: str, ocr_languages: str
+) -> ImportOptions:
+    options = ImportOptions(
+        title=title.strip(),
+        split_on=split_on,
+        ocr_mode=ocr_mode,
+        ocr_languages=ocr_languages.strip() or None,
     )
-    return {"project": meta.to_dict()}
-
-
-def _read_source(
-    data: bytes, suffix: str, filename: str, title: str, split_on: str
-) -> Document:
-    # Os extratores trabalham com caminho em disco, não com bytes.
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as temporary:
-        temporary.write(data)
-        temporary.flush()
-
-        if suffix == ".pdf":
-            from ..core.structure import split_into_chapters
-
-            images: dict[str, bytes] = {}
-            blocks, guessed_title = extract_blocks(
-                temporary.name, source_name=filename, images=images
-            )
-            document = Document(title=title or guessed_title, images=images)
-            document.chapters = split_into_chapters(blocks, split_on=split_on)
-        else:
-            document = read_epub(temporary.name)
-            if title:
-                document.title = title
-    return document
+    # Vai para a linha de comando do Tesseract: só letras, "_" e "+".
+    if options.ocr_languages and not _LANGUAGE_SPEC.match(options.ocr_languages):
+        raise HTTPException(400, "Idiomas do OCR inválidos")
+    try:
+        options.validate()
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return options
 
 
 # --------------------------------------------------------------------------

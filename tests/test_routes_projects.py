@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from app.core.blocks import Block  # noqa: E402
 from app.deps import reset_caches  # noqa: E402
-from app.routes import projects as project_routes  # noqa: E402
+from app.core import importer  # noqa: E402
 
 
 @pytest.fixture
@@ -104,11 +104,11 @@ def test_extensao_invalida_e_recusada(client):
 
 
 def test_importacao_lenta_nao_trava_o_servidor(client, monkeypatch):
-    def extracao_lenta(path, source_name=""):
+    def extracao_lenta(path, **_):
         time.sleep(1.5)  # CPU ocupada, como o pdfminer num livro grande
         return [Block(kind="paragraph", text="Texto.")], "Lento"
 
-    monkeypatch.setattr(project_routes, "extract_blocks", extracao_lenta)
+    monkeypatch.setattr(importer, "extract_blocks", extracao_lenta)
 
     importacao = threading.Thread(
         target=lambda: client.post(

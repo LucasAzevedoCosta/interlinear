@@ -1,9 +1,12 @@
-"""Tarefas de tradução em segundo plano.
+"""Tarefas em segundo plano: tradução e importação.
 
 Traduzir um livro leva de minutos a horas. A requisição HTTP não pode ficar
 aberta esse tempo todo, então quem dispara a tradução recebe um id de tarefa e
 consulta o progresso. O resultado é gravado no projeto conforme avança, de modo
 que fechar a aba não perde nada.
+
+A importação segue o mesmo modelo: um PDF escaneado leva cerca de um minuto
+no OCR, e a interface mostra a página em que ele está.
 """
 
 from __future__ import annotations
@@ -118,3 +121,91 @@ class JobRegistry:
 
 
 registry = JobRegistry()
+
+
+class ImportCancelled(Exception):
+    """Levantada dentro da extração quando o usuário cancela a importação."""
+
+
+@dataclass
+class ImportJob:
+    id: str
+    filename: str
+    status: str = "running"  # running | done | error | stopped
+    # read (lendo as páginas) | ocr | build (montando capítulos) | save
+    stage: str = "read"
+    done: int = 0
+    total: int = 0
+    error: str = ""
+    project_id: str | None = None
+    started_at: float = field(default_factory=time.time)
+    finished_at: float | None = None
+    stage_started_at: float = field(default_factory=time.time)
+    _stop_requested: bool = False
+
+    def request_stop(self) -> None:
+        self._stop_requested = True
+
+    def report(self, stage: str, done: int, total: int) -> None:
+        """Recebe o andamento da extração (pdf_extract.OnProgress), na thread dela."""
+        if self._stop_requested:
+            raise ImportCancelled
+        if stage != self.stage:
+            self.stage_started_at = time.time()
+        self.stage, self.done, self.total = stage, done, total
+
+    def eta_seconds(self) -> float | None:
+        """O ritmo da etapa atual aplicado ao que falta dela."""
+        if self.done < 3 or self.total <= self.done:
+            return None
+        rate = self.done / max(time.time() - self.stage_started_at, 0.001)
+        return (self.total - self.done) / rate
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "filename": self.filename,
+            "status": self.status,
+            "stage": self.stage,
+            "done": self.done,
+            "total": self.total,
+            "error": self.error,
+            "project_id": self.project_id,
+            "elapsed_seconds": round((self.finished_at or time.time()) - self.started_at, 1),
+            "eta_seconds": (
+                round(eta, 1) if (eta := self.eta_seconds()) is not None else None
+            ),
+        }
+
+
+class ImportRegistry:
+    """As importações em memória. Várias podem rodar ao mesmo tempo."""
+
+    def __init__(self) -> None:
+        self._jobs: dict[str, ImportJob] = {}
+
+    def create(self, job_id: str, filename: str) -> ImportJob:
+        job = ImportJob(id=job_id, filename=filename)
+        self._jobs[job_id] = job
+        self._prune()
+        return job
+
+    def get(self, job_id: str) -> ImportJob | None:
+        return self._jobs.get(job_id)
+
+    def running(self) -> list[ImportJob]:
+        return sorted(
+            (job for job in self._jobs.values() if job.status == "running"),
+            key=lambda job: job.started_at,
+        )
+
+    def _prune(self, keep: int = 20) -> None:
+        finished = sorted(
+            (j for j in self._jobs.values() if j.status != "running"),
+            key=lambda j: j.finished_at or 0,
+        )
+        while len(self._jobs) > keep and finished:
+            self._jobs.pop(finished.pop(0).id, None)
+
+
+imports = ImportRegistry()

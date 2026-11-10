@@ -27,6 +27,12 @@ const state = {
   previewTranslated: true,
   dirty: new Map(),
   saveTimer: null,
+  // Importações em andamento, pelo id da tarefa (ou um id local enquanto o
+  // arquivo ainda sobe).
+  imports: new Map(),
+  importTimer: null,
+  importOptions: null,
+  pendingFile: null,
 };
 
 /* ------------------------------------------------------------------ rede */
@@ -119,24 +125,316 @@ function renderProjects() {
   }
 }
 
+/* ------------------------------------------------------------- importação */
+
+// Escolher o arquivo abre as opções; "Importar" envia e cria uma tarefa no
+// servidor, acompanhada na lista da tela inicial até o livro ficar pronto.
+
+const IMPORT_STAGES = {
+  upload: 'Enviando',
+  read: 'Lendo as páginas',
+  ocr: 'Reconhecendo o texto (OCR)',
+  build: 'Montando os capítulos',
+  save: 'Gravando',
+};
+
 async function importFile(file) {
   if (!file) return;
-  const form = new FormData();
-  form.append('file', file);
+  $('fileInput').value = '';  // escolher o mesmo arquivo de novo dispara onchange
+  const kind = file.name.toLowerCase().match(/\.(pdf|epub)$/)?.[1];
+  if (!kind) { toast('Envie um arquivo .pdf ou .epub', 'error'); return; }
 
-  toast(`Lendo ${file.name}…`);
-  $('pickBtn').disabled = true;
+  state.pendingFile = file;
+  $('importHeading').textContent = kind === 'pdf' ? 'Importar PDF' : 'Importar EPUB';
+  $('importFileName').textContent =
+    `${file.name} · ${(file.size / 1024 / 1024).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MB`;
+  $('importTitle').value = '';
+  $('importTitle').placeholder = kind === 'pdf' ? 'detectar pela folha de rosto' : 'o que está no EPUB';
+  $('importTitleHint').textContent = 'Deixe em branco para usar o título do arquivo. Dá para mudar depois.';
+  for (const element of document.querySelectorAll('.pdf-only')) element.hidden = kind !== 'pdf';
+  $('importSheet').hidden = false;
+  $('startImport').focus();
+  if (kind === 'pdf') await loadImportOptions();
+}
 
+async function loadImportOptions() {
   try {
-    const data = await api('/api/projects', { method: 'POST', body: form });
-    toast('Pronto. Abrindo o livro.');
-    await openProject(data.project.id);
-    loadProjects();
+    state.importOptions ??= await api('/api/imports/options');
   } catch (error) {
     toast(error.message, 'error');
-  } finally {
-    $('pickBtn').disabled = false;
+    return;
   }
+  const { ocr } = state.importOptions;
+  const force = $('importOcr').querySelector('option[value="force"]');
+  force.disabled = !ocr.available;
+  if (!ocr.available && $('importOcr').value === 'force') $('importOcr').value = 'auto';
+  $('importOcrHint').textContent = ocr.available
+    ? '"Todas as páginas" serve para PDFs cujo texto sai embaralhado ou com ' +
+      'letras trocadas. O OCR leva cerca de 1 segundo por página.'
+    : 'O Tesseract não está instalado: páginas escaneadas ficam sem texto. ' +
+      'O README explica como instalar (a imagem Docker já traz).';
+
+  const langs = $('importLangs');
+  langs.innerHTML = '';
+  // O Tesseract dá preferência ao primeiro idioma: os padrões vêm antes, na
+  // ordem deles, e a ordem da tela é a ordem enviada.
+  const defaults = ocr.default.split('+');
+  const chosen = new Set(defaults);
+  const ordered = [...defaults, ...ocr.languages.filter((code) => !chosen.has(code))];
+  for (const code of ordered) {
+    const label = document.createElement('label');
+    label.className = 'check';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.value = code;
+    box.checked = chosen.has(code);
+    label.append(box, ` ${LANGUAGE_NAMES[code] || code}`);
+    langs.append(label);
+  }
+  syncOcrFields();
+}
+
+// Os nomes dos idiomas mais comuns do Tesseract; os outros aparecem pelo código.
+const LANGUAGE_NAMES = {
+  por: 'Português', eng: 'Inglês', spa: 'Espanhol', fra: 'Francês', deu: 'Alemão',
+  ita: 'Italiano', lat: 'Latim', nld: 'Holandês', rus: 'Russo', jpn: 'Japonês',
+  chi_sim: 'Chinês simplificado', chi_tra: 'Chinês tradicional', ell: 'Grego', grc: 'Grego antigo',
+};
+
+function syncOcrFields() {
+  const ocr = state.importOptions?.ocr;
+  $('importLangsField').hidden = !ocr?.available || !ocr.languages.length || $('importOcr').value === 'off';
+}
+
+async function startImport() {
+  const file = state.pendingFile;
+  if (!file) return;
+  state.pendingFile = null;
+  $('importSheet').hidden = true;
+
+  const form = new FormData();
+  form.append('file', file);
+  form.append('title', $('importTitle').value.trim());
+  if (file.name.toLowerCase().endsWith('.pdf')) {
+    form.append('split_on', $('importSplit').value);
+    form.append('ocr_mode', $('importOcr').value);
+    const langs = [...$('importLangs').querySelectorAll('input:checked')].map((box) => box.value);
+    if (langs.length) form.append('ocr_languages', langs.join('+'));
+  }
+
+  // Enquanto o arquivo sobe, a importação ainda não tem id no servidor.
+  const local = { id: `envio-${Date.now()}`, filename: file.name, status: 'running', stage: 'upload', done: 0, total: 100 };
+  state.imports.set(local.id, local);
+  renderImports();
+
+  try {
+    const { import: job } = await upload('/api/imports', form, (fraction) => {
+      local.done = Math.round(fraction * 100);
+      renderImports();
+    }, (xhr) => { local.abort = () => xhr.abort(); });
+    state.imports.delete(local.id);
+    state.imports.set(job.id, job);
+    renderImports();
+    watchImports();
+  } catch (error) {
+    state.imports.delete(local.id);
+    renderImports();
+    if (error.name !== 'AbortError') toast(error.message, 'error');
+  }
+}
+
+// fetch não informa o progresso do envio; XMLHttpRequest sim. Livros de
+// 200 MB levam alguns segundos para subir até num servidor local em Docker.
+function upload(path, form, onProgress, onStart) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', path);
+    xhr.responseType = 'json';
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(event.loaded / event.total);
+    };
+    xhr.onload = () => {
+      if (xhr.status < 300) return resolve(xhr.response);
+      const detail = xhr.response?.detail || `Erro ${xhr.status}`;
+      reject(new Error(typeof detail === 'string' ? detail : JSON.stringify(detail)));
+    };
+    xhr.onerror = () => reject(new Error('Falha de rede ao enviar o arquivo'));
+    xhr.onabort = () => reject(Object.assign(new Error('Envio cancelado'), { name: 'AbortError' }));
+    onStart(xhr);
+    xhr.send(form);
+  });
+}
+
+function renderImports() {
+  const list = $('importList');
+  list.innerHTML = '';
+  for (const job of state.imports.values()) {
+    const row = document.createElement('div');
+    row.className = 'import';
+
+    const name = document.createElement('span');
+    name.className = 'import__name';
+    name.textContent = job.filename;
+
+    const status = document.createElement('span');
+    status.className = 'import__status';
+    status.textContent = importLabel(job);
+
+    const track = document.createElement('span');
+    track.className = 'progress__track import__track';
+    const fill = document.createElement('span');
+    fill.className = 'progress__fill';
+    fill.style.width = `${job.total ? Math.round((job.done / job.total) * 100) : 0}%`;
+    track.append(fill);
+
+    const cancel = document.createElement('button');
+    cancel.className = 'btn btn--quiet';
+    cancel.textContent = 'Cancelar';
+    cancel.disabled = Boolean(job.cancelling);
+    cancel.onclick = () => cancelImport(job);
+
+    row.append(name, status, track, cancel);
+    list.append(row);
+  }
+}
+
+function importLabel(job) {
+  if (job.cancelling) return 'Cancelando…';
+  const stage = IMPORT_STAGES[job.stage] || job.stage;
+  if (job.stage === 'upload') return `${stage} · ${job.done}%`;
+  if (job.stage === 'read' && job.total > 1) {
+    return `${stage} · ${job.done} de ${job.total}`;
+  }
+  if (job.stage === 'ocr') {
+    const eta = job.eta_seconds >= 2 ? ` · faltam ${formatDuration(job.eta_seconds)}` : '';
+    return `${stage} · página ${job.done} de ${job.total}${eta}`;
+  }
+  return stage;
+}
+
+async function cancelImport(job) {
+  if (job.abort) { job.abort(); return; }
+  job.cancelling = true;
+  renderImports();
+  try {
+    await api(`/api/imports/${job.id}/cancel`, { method: 'POST' });
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+
+// Uma consulta por vez, para todas as importações: chamar de novo enquanto
+// uma está agendada ou em andamento não faz nada.
+function watchImports() {
+  if (!state.importTimer) state.importTimer = setTimeout(pollImports, 300);
+}
+
+async function pollImports() {
+  state.importTimer = true;  // em andamento
+  const running = [...state.imports.values()].filter((job) => job.stage !== 'upload');
+
+  for (const job of running) {
+    let current;
+    try {
+      ({ import: current } = await api(`/api/imports/${job.id}`));
+    } catch (error) {
+      state.imports.delete(job.id);
+      toast(error.message, 'error');
+      continue;
+    }
+    if (current.status === 'running') {
+      state.imports.set(job.id, { ...current, cancelling: job.cancelling });
+      continue;
+    }
+    state.imports.delete(job.id);
+    finishImport(current);
+  }
+  renderImports();
+  const pending = [...state.imports.values()].some((job) => job.stage !== 'upload');
+  state.importTimer = pending ? setTimeout(pollImports, 700) : null;
+}
+
+async function finishImport(job) {
+  if (job.status === 'stopped') { toast(`Importação de "${job.filename}" cancelada.`); return; }
+  if (job.status === 'error') { toast(job.error, 'error'); return; }
+
+  loadProjects();
+  // Quem já abriu outro livro enquanto esperava não é arrancado dele.
+  if (state.project) {
+    toast(`"${job.filename}" importado.`, 'info', {
+      label: 'Abrir',
+      onClick: () => openImported(job.project_id),
+    });
+    return;
+  }
+  openImported(job.project_id);
+}
+
+async function openImported(projectId) {
+  await openProject(projectId);
+  if (state.project?.import_summary) showSummary(state.project);
+}
+
+async function resumeImports() {
+  try {
+    const { imports } = await api('/api/imports');
+    for (const job of imports) state.imports.set(job.id, job);
+    renderImports();
+    if (imports.length) watchImports();
+  } catch { /* sem importações em andamento */ }
+}
+
+function showSummary(project) {
+  const summary = project.import_summary || {};
+  $('summaryFile').textContent = project.source_filename;
+
+  const number = (value) => Number(value || 0).toLocaleString('pt-BR');
+  const stats = [
+    ['Páginas', summary.pages != null ? number(summary.pages) : null],
+    ['Páginas lidas pelo OCR', summary.ocr_pages ? number(summary.ocr_pages) : null],
+    ['Idiomas do OCR', summary.ocr_pages
+      ? summary.ocr_languages.split('+').map((code) => LANGUAGE_NAMES[code] || code).join(', ')
+      : null],
+    ['Capítulos', number(summary.chapters)],
+    ['Palavras', number(summary.words)],
+    ['Títulos', number(summary.headings)],
+    ['Parágrafos', number(summary.paragraphs)],
+    ['Notas de rodapé', summary.footnotes ? number(summary.footnotes) : null],
+    ['Tabelas', summary.tables ? number(summary.tables) : null],
+    ['Imagens', summary.images ? number(summary.images) : null],
+    ['Tempo', summary.seconds != null
+      ? (summary.seconds < 1 ? 'menos de 1s' : formatDuration(summary.seconds))
+      : null],
+  ];
+  const list = $('summaryStats');
+  list.innerHTML = '';
+  for (const [label, value] of stats) {
+    if (value == null) continue;
+    const item = document.createElement('div');
+    const term = document.createElement('dt');
+    term.textContent = label;
+    const detail = document.createElement('dd');
+    detail.textContent = value;
+    item.append(term, detail);
+    list.append(item);
+  }
+
+  const warnings = $('summaryWarnings');
+  warnings.innerHTML = '';
+  if (summary.warnings?.length) {
+    const head = document.createElement('p');
+    head.className = 'summary__head';
+    head.textContent = 'Vale conferir';
+    const items = document.createElement('ul');
+    items.className = 'summary__warnings';
+    for (const text of summary.warnings) {
+      const item = document.createElement('li');
+      item.textContent = text;
+      items.append(item);
+    }
+    warnings.append(head, items);
+  }
+  $('summarySheet').hidden = false;
 }
 
 /* ------------------------------------------------------------- a bancada */
@@ -945,6 +1243,16 @@ function wire() {
     importFile(event.dataTransfer.files[0]);
   };
 
+  $('startImport').onclick = startImport;
+  $('importOcr').onchange = syncOcrFields;
+  const closeImport = () => { state.pendingFile = null; $('importSheet').hidden = true; };
+  $('closeImport').onclick = closeImport;
+  $('importSheet').onclick = (event) => { if (event.target === $('importSheet')) closeImport(); };
+  const closeSummary = () => { $('summarySheet').hidden = true; };
+  $('closeSummary').onclick = closeSummary;
+  $('summaryDone').onclick = closeSummary;
+  $('summarySheet').onclick = (event) => { if (event.target === $('summarySheet')) closeSummary(); };
+
   $('homeBtn').onclick = goHome;
   $('translateBtn').onclick = startTranslation;
   $('exportBtn').onclick = async () => {
@@ -993,7 +1301,11 @@ function wire() {
       flushSaves();
       toast('Salvo');
     }
-    if (event.key === 'Escape') $('settingsSheet').hidden = true;
+    if (event.key === 'Escape') {
+      $('settingsSheet').hidden = true;
+      closeImport();
+      closeSummary();
+    }
   });
 
   window.addEventListener('beforeunload', flushSaves);
@@ -1009,3 +1321,4 @@ function setPreviewMode(translated) {
 wire();
 loadProjects();
 loadSettings();
+resumeImports();

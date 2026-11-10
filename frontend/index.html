@@ -50,6 +50,8 @@
           <input type="file" id="fileInput" accept=".pdf,.epub" hidden/>
         </div>
 
+        <div class="imports" id="importList" aria-live="polite"></div>
+
         <div class="projects">
           <p class="projects__head">Seus livros</p>
           <div id="projectList"></div>
@@ -85,6 +87,74 @@
     </aside>
 
   </main>
+</div>
+
+<!-- Opções da importação: entre escolher o arquivo e importar -->
+<div class="sheet" id="importSheet" hidden>
+  <div class="sheet__panel" role="dialog" aria-labelledby="importHeading">
+    <div class="sheet__head">
+      <h2 id="importHeading">Importar</h2>
+      <button class="btn btn--quiet" id="closeImport">Cancelar</button>
+    </div>
+
+    <p class="import-file" id="importFileName"></p>
+
+    <div class="field">
+      <label for="importTitle">Título do livro</label>
+      <input type="text" id="importTitle"/>
+      <p class="field__hint" id="importTitleHint"></p>
+    </div>
+
+    <div class="pdf-only">
+      <div class="field">
+        <label for="importSplit">Capítulos começam em</label>
+        <select id="importSplit">
+          <option value="heading1">Títulos principais</option>
+          <option value="heading2">Títulos e subtítulos</option>
+          <option value="none">Não dividir pelos títulos</option>
+        </select>
+        <p class="field__hint">
+          Use "títulos e subtítulos" quando o livro tem partes com capítulos
+          dentro. Sem dividir, os capítulos são cortados só pelo tamanho. Dá
+          para dividir e juntar depois, na etapa de conversão.
+        </p>
+      </div>
+
+      <div class="field">
+        <label for="importOcr">Reconhecimento de texto (OCR)</label>
+        <select id="importOcr">
+          <option value="auto">Automático: só as páginas escaneadas</option>
+          <option value="force">Todas as páginas, ignorando o texto do PDF</option>
+          <option value="off">Desligado</option>
+        </select>
+        <p class="field__hint" id="importOcrHint">
+          "Todas as páginas" serve para PDFs cujo texto sai embaralhado ou com
+          letras trocadas. O OCR leva cerca de 1 segundo por página.
+        </p>
+      </div>
+
+      <div class="field" id="importLangsField">
+        <span class="field__label">Idiomas do livro, para o OCR</span>
+        <div class="checks" id="importLangs"></div>
+      </div>
+    </div>
+
+    <button class="btn btn--primary" id="startImport">Importar</button>
+  </div>
+</div>
+
+<!-- Resumo da importação -->
+<div class="sheet" id="summarySheet" hidden>
+  <div class="sheet__panel" role="dialog" aria-labelledby="summaryHeading">
+    <div class="sheet__head">
+      <h2 id="summaryHeading">Resumo da importação</h2>
+      <button class="btn btn--quiet" id="closeSummary">Fechar</button>
+    </div>
+    <p class="import-file" id="summaryFile"></p>
+    <dl class="summary" id="summaryStats"></dl>
+    <div id="summaryWarnings"></div>
+    <button class="btn btn--primary" id="summaryDone">Revisar a conversão</button>
+  </div>
 </div>
 
 <!-- Painel de configurações -->

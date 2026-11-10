@@ -497,6 +497,39 @@ button {
 
 .drop__hint { color: var(--on-bench-dim); font-size: 13px; margin: 10px 0 0; }
 
+/* Importações em andamento, logo abaixo da área de soltar. */
+.imports:not(:empty) { margin-top: 16px; }
+
+.import {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--bench-deep);
+  margin-bottom: 6px;
+}
+
+.import__name {
+  font-family: var(--text);
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import__status {
+  grid-column: 1;
+  font-size: 12px;
+  color: var(--on-bench-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.import__track { grid-column: 1; width: 100%; }
+.import .btn { grid-column: 2; grid-row: 1 / span 3; }
+
 .projects { margin-top: 40px; }
 
 .projects__head {
@@ -612,6 +645,51 @@ button {
 }
 
 .field__hint { font-size: 11px; color: var(--on-bench-dim); margin: 5px 0 0; line-height: 1.5; }
+
+.field__label {
+  display: block;
+  font-size: 12px;
+  color: var(--on-bench-dim);
+  margin-bottom: 5px;
+}
+
+.checks { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+
+.import-file {
+  font-family: var(--text);
+  font-size: 14px;
+  margin: -8px 0 18px;
+  color: var(--on-bench-dim);
+  overflow-wrap: anywhere;
+}
+
+/* Resumo da importação: números em duas colunas e o que vale conferir. */
+.summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  margin: 0 0 22px;
+}
+
+.summary dt { font-size: 11px; color: var(--on-bench-dim); }
+.summary dd {
+  margin: 2px 0 0;
+  font-family: var(--text);
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary__head { font-size: 12px; color: var(--pending); margin: 0 0 6px; }
+
+.summary__warnings {
+  margin: 0 0 22px;
+  padding-left: 18px;
+  line-height: 1.55;
+  font-size: 13px;
+}
+
+.summary__warnings li + li { margin-top: 6px; }
 
 .row { display: flex; gap: 10px; }
 .row > * { flex: 1; }

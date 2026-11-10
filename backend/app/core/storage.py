@@ -15,7 +15,7 @@ import os
 import shutil
 import tempfile
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, TypeVar
@@ -47,6 +47,9 @@ class ProjectMeta:
     word_count: int = 0
     translated_count: int = 0
     total_translatable: int = 0
+    # O que a importação encontrou (ver core/importer.build_summary). Vazio em
+    # projetos importados antes dele existir.
+    import_summary: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
@@ -86,6 +89,7 @@ class ProjectStore:
         source_kind: str = "pdf",
         source_filename: str = "",
         source_bytes: bytes | None = None,
+        import_summary: dict[str, Any] | None = None,
     ) -> ProjectMeta:
         project_id = new_id()
         directory = self.project_dir(project_id)
@@ -112,6 +116,7 @@ class ProjectStore:
             word_count=document.word_count(),
             total_translatable=len(document.translatable_blocks()),
             translated_count=_count_translated(document),
+            import_summary=import_summary or {},
         )
 
         self.save_document(project_id, document)

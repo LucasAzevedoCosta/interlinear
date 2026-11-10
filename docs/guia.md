@@ -238,7 +238,9 @@ AGPL) em [`licencas.md`](licencas.md).
 backend/app/
   core/            nada aqui sabe que existe uma web ou uma IA
     blocks.py      estrutura de dados comum a tudo
+    importer.py    arquivo enviado → documento, com progresso e resumo
     pdf_extract.py PDF → blocos, via pistas tipográficas
+    ocr.py         páginas escaneadas → linhas, via Tesseract
     structure.py   blocos → capítulos
     epub_write.py  capítulos → EPUB 3
     epub_read.py   EPUB → blocos
@@ -247,6 +249,7 @@ backend/app/
     base.py        interface comum, retentativa com espera exponencial
     providers.py   OpenAI, Anthropic, Google, Ollama, LM Studio
     translator.py  lotes, glossário, contexto, verificação de formato
+  jobs.py          tarefas em segundo plano: importação e tradução
   routes/          HTTP
 frontend/          JavaScript puro, sem build
 ```

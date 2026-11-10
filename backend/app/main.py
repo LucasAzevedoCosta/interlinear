@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import data_root
-from .routes import ai, projects
+from .routes import ai, imports, projects
 
 logging.basicConfig(
     level=os.environ.get("INTERLINEAR_LOG_LEVEL", "INFO"),
@@ -50,6 +50,7 @@ app = FastAPI(
 )
 
 app.include_router(projects.router)
+app.include_router(imports.router)
 app.include_router(ai.router)
 
 
