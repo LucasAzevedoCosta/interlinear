@@ -24,6 +24,8 @@ const state = {
   editingProviderId: null,
   jobId: null,
   jobTimer: null,
+  // "convert" ou "translate": a etapa aberta (ver setStage).
+  stage: 'convert',
   previewTranslated: true,
   dirty: new Map(),
   saveTimer: null,
@@ -445,12 +447,14 @@ async function openProject(projectId) {
     state.project = data.project;
     state.doc = data.document;
     state.chapterId = data.document.chapters[0]?.id || null;
+    state.stage = initialStage(data.project);
 
     $('start').hidden = true;
     for (const id of ['rail', 'editor', 'preview']) $(id).hidden = false;
-    for (const id of ['homeBtn', 'translateBtn', 'exportBtn', 'bookBar']) $(id).hidden = false;
+    for (const id of ['homeBtn', 'exportBtn', 'bookBar']) $(id).hidden = false;
 
     $('bookTitle').value = data.document.title;
+    applyStage();
     renderRail();
     renderEditor();
     refreshPreview();
@@ -472,18 +476,68 @@ function goHome() {
   loadProjects();
 }
 
+/* ---------------------------------------------------------------- etapas */
+
+// Conversão: o texto e a estrutura que vieram do arquivo, para corrigir antes
+// de exportar ou traduzir. Tradução: o campo de tradução sob cada original.
+// A etapa fica lembrada por livro, neste navegador.
+
+function stageKey(projectId) {
+  return `interlinear.stage.${projectId}`;
+}
+
+function initialStage(project) {
+  try {
+    const saved = localStorage.getItem(stageKey(project.id));
+    if (saved === 'convert' || saved === 'translate') return saved;
+  } catch { /* armazenamento bloqueado: decide pelo livro */ }
+  return project.translated_count ? 'translate' : 'convert';
+}
+
+function setStage(stage) {
+  if (!state.project || stage === state.stage) return;
+  flushSaves();
+  state.stage = stage;
+  try { localStorage.setItem(stageKey(state.project.id), stage); } catch { /* fica só nesta sessão */ }
+  applyStage();
+  renderRail();
+  renderEditor();
+  refreshPreview();
+  updateStat();
+}
+
+function applyStage() {
+  const translating = state.stage === 'translate';
+  $('stageConvert').setAttribute('aria-pressed', !translating);
+  $('stageTranslate').setAttribute('aria-pressed', translating);
+  $('translateBtn').hidden = !translating;
+  $('previewToggle').hidden = !translating;
+  $('previewLabel').hidden = translating;
+  $('editor').dataset.stage = state.stage;
+}
+
 function chapterProgress(chapter) {
   const translatable = chapter.blocks.filter(
     (b) => b.text.trim() && b.kind !== 'image' && b.kind !== 'page_break'
   );
   const done = translatable.filter((b) => b.translated && b.translated.trim());
-  return { done: done.length, total: translatable.length };
+  const stale = done.filter((b) => b.meta?.stale);
+  return { done: done.length, total: translatable.length, stale: stale.length };
+}
+
+function chapterPages(chapter) {
+  const pages = chapter.blocks.map((b) => b.page).filter(Boolean);
+  if (!pages.length) return '';
+  const first = Math.min(...pages);
+  const last = Math.max(...pages);
+  return first === last ? `p. ${first}` : `p. ${first}–${last}`;
 }
 
 function renderRail() {
   const list = $('chapterList');
   list.innerHTML = '';
   $('chapterCount').textContent = state.doc.chapters.length;
+  const converting = state.stage === 'convert';
 
   state.doc.chapters.forEach((chapter, index) => {
     const { done, total } = chapterProgress(chapter);
@@ -500,15 +554,20 @@ function renderRail() {
 
     const meta = document.createElement('span');
     meta.className = 'chapter__meta';
-    meta.textContent = total ? `${done}/${total} parágrafos` : 'sem texto';
-
-    const gauge = document.createElement('span');
-    gauge.className = 'chapter__gauge';
-    const fill = document.createElement('i');
-    fill.style.width = `${pct}%`;
-    gauge.append(fill);
-
-    button.append(title, meta, gauge);
+    if (converting) {
+      const blocks = chapter.blocks.length;
+      meta.textContent = [`${blocks} ${blocks === 1 ? 'bloco' : 'blocos'}`, chapterPages(chapter)]
+        .filter(Boolean).join(' · ');
+      button.append(title, meta);
+    } else {
+      meta.textContent = total ? `${done}/${total} parágrafos` : 'sem texto';
+      const gauge = document.createElement('span');
+      gauge.className = 'chapter__gauge';
+      const fill = document.createElement('i');
+      fill.style.width = `${pct}%`;
+      gauge.append(fill);
+      button.append(title, meta, gauge);
+    }
     list.append(button);
   });
 }
@@ -532,7 +591,14 @@ const MARKS = {
   image: '▣', page_break: '⎯',
 };
 
+const KIND_LABELS = {
+  heading1: 'Título 1', heading2: 'Título 2', heading3: 'Título 3',
+  paragraph: 'Parágrafo', quote: 'Citação', list_item: 'Item de lista',
+  footnote: 'Nota de rodapé', table: 'Tabela',
+};
+
 function blockState(block) {
+  if (block.translated && block.meta?.stale) return 'stale';
   if (block.meta?.edited) return 'human';
   if (block.translated && block.translated.trim()) return 'machine';
   return 'pending';
@@ -556,10 +622,25 @@ function renderEditor() {
 
   const note = document.createElement('p');
   note.className = 'editor__note';
-  const { done, total } = chapterProgress(chapter);
-  note.textContent = total
-    ? `${done} de ${total} parágrafos traduzidos. O texto original fica acima de cada campo.`
-    : 'Capítulo sem texto traduzível.';
+  if (state.stage === 'convert') {
+    note.textContent =
+      'Confira o que veio do arquivo: clique num trecho para corrigir o texto, ' +
+      'troque o tipo do bloco ou comece um capítulo onde o livro começa. ';
+    if (state.project.import_summary?.chapters != null) {
+      const link = document.createElement('button');
+      link.className = 'editor__link';
+      link.textContent = 'Resumo da importação';
+      link.onclick = () => showSummary(state.project);
+      note.append(link);
+    }
+  } else {
+    const { done, total, stale } = chapterProgress(chapter);
+    note.textContent = total
+      ? `${done} de ${total} parágrafos traduzidos.` +
+        (stale ? ` ${stale} com o original alterado depois da tradução.` : '') +
+        ' O texto original fica acima de cada campo.'
+      : 'Capítulo sem texto traduzível.';
+  }
   inner.append(note);
 
   chapter.blocks.forEach((block, index) => {
@@ -567,9 +648,7 @@ function renderEditor() {
   });
 }
 
-const TEXT_KINDS = new Set([
-  'heading1', 'heading2', 'heading3', 'paragraph', 'quote', 'list_item', 'footnote', 'table',
-]);
+const TEXT_KINDS = new Set(Object.keys(KIND_LABELS));
 
 // Mesma regra do inline_html do backend: escapa tudo e reabilita só as tags de
 // ênfase, para o original mostrar itálico e negrito em vez de "<em>".
@@ -591,13 +670,7 @@ function autoGrow(field) {
   field.style.height = `${field.scrollHeight}px`;
 }
 
-function renderBlock(block, next) {
-  const wrapper = document.createElement('div');
-  wrapper.className = 'block';
-  wrapper.dataset.id = block.id;
-  wrapper.dataset.kind = block.kind;
-  wrapper.dataset.state = blockState(block);
-
+function renderMark(block) {
   const mark = document.createElement('span');
   mark.className = 'block__mark';
   mark.textContent = MARKS[block.kind] || '¶';
@@ -607,39 +680,114 @@ function renderBlock(block, next) {
     mark.textContent = block.meta?.marker || MARKS.footnote;
     mark.title = `Nota de rodapé${mark.title ? ` · ${mark.title}` : ''}`;
   }
-  wrapper.append(mark);
+  return mark;
+}
+
+function renderBlock(block, next) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'block';
+  wrapper.dataset.id = block.id;
+  wrapper.dataset.kind = block.kind;
+  wrapper.append(renderMark(block));
+  const converting = state.stage === 'convert';
 
   if (block.kind === 'image') {
     const img = document.createElement('p');
     img.className = 'block__source';
     img.textContent = `[imagem: ${block.src || 'sem arquivo'}]`;
-    wrapper.append(img, renderStructureTools(block, next));
+    wrapper.append(img);
+    if (converting) wrapper.append(renderStructureTools(block, next, wrapper));
     return wrapper;
   }
 
-  // O original vem do arquivo e não se edita, exceto num bloco que o próprio
-  // usuário inseriu: ali o original é justamente o que faltou na extração.
-  if (block.meta?.inserted) {
-    const sourceField = document.createElement('textarea');
-    sourceField.className = 'block__source block__source-field';
-    sourceField.rows = 1;
-    sourceField.value = block.text;
-    sourceField.placeholder = 'texto original que faltou';
-    sourceField.setAttribute('aria-label', 'Texto original deste parágrafo');
-    sourceField.oninput = () => {
-      autoGrow(sourceField);
-      block.text = sourceField.value;
-      queueUpdate(block.id, { text: block.text });
-    };
-    sourceField.onblur = () => flushSaves();
-    wrapper.append(sourceField);
-    requestAnimationFrame(() => autoGrow(sourceField));
+  if (converting) {
+    wrapper.append(renderSourceEditor(block), renderStructureTools(block, next, wrapper));
   } else {
-    const source = document.createElement('p');
-    source.className = 'block__source';
-    source.innerHTML = inlineHtml(block.text);
-    wrapper.append(source);
+    wrapper.dataset.state = blockState(block);
+    renderTranslation(block, wrapper);
   }
+  return wrapper;
+}
+
+// Conversão: o original aparece formatado; um clique troca por um campo com o
+// texto cru, onde o itálico aparece como <em>…</em>.
+function renderSourceEditor(block) {
+  const box = document.createElement('div');
+
+  const view = document.createElement('p');
+  view.className = 'block__text';
+  view.tabIndex = 0;
+  view.setAttribute('role', 'button');
+  view.title = 'Clique para corrigir o texto';
+
+  const field = document.createElement('textarea');
+  field.className = 'block__text block__text-field';
+  field.rows = 1;
+  field.hidden = true;
+  field.placeholder = 'texto que faltou na conversão';
+  field.setAttribute('aria-label', 'Texto original deste bloco');
+
+  const show = () => {
+    view.innerHTML = inlineHtml(block.text);
+    view.dataset.empty = !block.text.trim();
+  };
+  const open = () => {
+    view.hidden = true;
+    field.hidden = false;
+    field.value = block.text;
+    autoGrow(field);
+    field.focus();
+  };
+
+  view.onclick = open;
+  view.onkeydown = (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      open();
+    }
+  };
+  field.oninput = () => {
+    autoGrow(field);
+    block.text = field.value;
+    // O servidor marca o mesmo ao gravar; aqui é só para a tela concordar.
+    if (block.translated) block.meta = { ...(block.meta || {}), stale: true };
+    queueUpdate(block.id, { text: block.text });
+  };
+  field.onblur = () => {
+    show();
+    field.hidden = true;
+    view.hidden = false;
+    flushSaves();
+  };
+
+  show();
+  box.append(view, field);
+  return box;
+}
+
+// Tradução: o original fixo em cima, o campo de tradução embaixo.
+function renderTranslation(block, wrapper) {
+  const source = document.createElement('p');
+  source.className = 'block__source';
+  source.innerHTML = inlineHtml(block.text);
+  if (!block.text.trim()) source.textContent = '(sem texto: escreva o original na etapa de conversão)';
+  wrapper.append(source);
+
+  const stale = document.createElement('p');
+  stale.className = 'block__stale';
+  stale.hidden = blockState(block) !== 'stale';
+  stale.textContent = 'O original mudou depois desta tradução. ';
+  const keep = document.createElement('button');
+  keep.className = 'editor__link';
+  keep.textContent = 'Manter a tradução';
+  keep.onclick = () => {
+    block.meta = { ...(block.meta || {}), stale: false };
+    queueUpdate(block.id, { meta: { stale: false } });
+    stale.hidden = true;
+    wrapper.dataset.state = blockState(block);
+  };
+  stale.append(keep);
+  wrapper.append(stale);
 
   const field = document.createElement('textarea');
   field.className = 'block__field';
@@ -653,7 +801,8 @@ function renderBlock(block, next) {
   field.oninput = () => {
     grow();
     block.translated = field.value;
-    block.meta = { ...(block.meta || {}), edited: true };
+    block.meta = { ...(block.meta || {}), edited: true, stale: false };
+    stale.hidden = true;
     wrapper.dataset.state = blockState(block);
     markDirty(block);
   };
@@ -680,28 +829,46 @@ function renderBlock(block, next) {
   clear.onclick = () => {
     field.value = '';
     block.translated = null;
-    block.meta = { ...(block.meta || {}), edited: false };
+    block.meta = { ...(block.meta || {}), edited: false, stale: false };
+    stale.hidden = true;
     wrapper.dataset.state = 'pending';
     markDirty(block, true);
     grow();
   };
 
+  tools.append(copy, clear);
+  wrapper.append(tools);
+}
+
+// Os consertos de estrutura, só na etapa de conversão: tipo do bloco, começo
+// de capítulo, juntar, inserir e apagar. Valem para imagens também (apagar uma
+// figura solta, inserir texto depois dela).
+function renderStructureTools(block, next, wrapper) {
+  const tools = document.createElement('div');
+  tools.className = 'block__tools';
+
+  if (TEXT_KINDS.has(block.kind)) {
+    const kind = document.createElement('select');
+    kind.className = 'block__tool block__kind';
+    kind.setAttribute('aria-label', 'Tipo do bloco');
+    for (const [value, label] of Object.entries(KIND_LABELS)) {
+      kind.append(new Option(label, value, false, value === block.kind));
+    }
+    kind.onchange = () => {
+      block.kind = kind.value;
+      wrapper.dataset.kind = block.kind;
+      wrapper.querySelector('.block__mark').replaceWith(renderMark(block));
+      queueUpdate(block.id, { kind: block.kind });
+      flushSaves();
+    };
+    tools.append(kind);
+  }
+
   const split = document.createElement('button');
   split.className = 'block__tool';
   split.textContent = 'Começar capítulo aqui';
   split.onclick = () => splitHere(block.id);
-
-  tools.append(copy, clear, split, ...renderStructureTools(block, next).children);
-  wrapper.append(tools);
-
-  return wrapper;
-}
-
-// Juntar, inserir e apagar: os consertos de estrutura. Vale para imagens também
-// (apagar uma figura solta, inserir texto depois dela).
-function renderStructureTools(block, next) {
-  const tools = document.createElement('div');
-  tools.className = 'block__tools';
+  tools.append(split);
 
   if (TEXT_KINDS.has(block.kind) && next?.kind === block.kind) {
     const merge = document.createElement('button');
@@ -855,10 +1022,7 @@ function insertBelow(block) {
     `/chapters/${chapter.id}/blocks`,
     { method: 'POST', body: JSON.stringify({ index }) },
     (data) => {
-      const field = document.querySelector(
-        `.block[data-id="${data.block.id}"] .block__source-field`
-      );
-      field?.focus();
+      document.querySelector(`.block[data-id="${data.block.id}"] .block__text`)?.click();
     }
   );
 }
@@ -879,11 +1043,19 @@ function deleteBlock(block) {
 function updateStat() {
   const project = state.project;
   if (!project) return;
+  const words = `${project.word_count.toLocaleString('pt-BR')} palavras`;
+  if (state.stage === 'convert') {
+    const chapters = state.doc.chapters.length;
+    $('bookStat').textContent = `${words} · ${chapters} ${chapters === 1 ? 'capítulo' : 'capítulos'}`;
+    return;
+  }
   const pct = project.total_translatable
     ? Math.round((project.translated_count / project.total_translatable) * 100)
     : 0;
+  const stale = state.doc.chapters.reduce((sum, c) => sum + chapterProgress(c).stale, 0);
   $('bookStat').textContent =
-    `${project.word_count.toLocaleString('pt-BR')} palavras · ${pct}% traduzido`;
+    `${words} · ${pct}% traduzido` +
+    (stale ? ` · ${stale} ${stale === 1 ? 'desatualizado' : 'desatualizados'}` : '');
 }
 
 /* ---------------------------------------------------------------- preview */
@@ -892,7 +1064,7 @@ function refreshPreview() {
   if (!state.project || !state.chapterId) return;
   const url =
     `/api/projects/${state.project.id}/preview/${state.chapterId}` +
-    `?translated=${state.previewTranslated}&t=${Date.now()}`;
+    `?translated=${state.stage === 'translate' && state.previewTranslated}&t=${Date.now()}`;
   $('previewFrame').src = url;
 }
 
@@ -1250,15 +1422,27 @@ function wire() {
   $('importSheet').onclick = (event) => { if (event.target === $('importSheet')) closeImport(); };
   const closeSummary = () => { $('summarySheet').hidden = true; };
   $('closeSummary').onclick = closeSummary;
-  $('summaryDone').onclick = closeSummary;
+  $('summaryDone').onclick = () => {
+    closeSummary();
+    setStage('convert');
+  };
   $('summarySheet').onclick = (event) => { if (event.target === $('summarySheet')) closeSummary(); };
 
   $('homeBtn').onclick = goHome;
   $('translateBtn').onclick = startTranslation;
-  $('exportBtn').onclick = async () => {
-    await flushSaves();
-    window.location = `/api/projects/${state.project.id}/export?translated=true`;
+  $('stageConvert').onclick = () => setStage('convert');
+  $('stageTranslate').onclick = () => setStage('translate');
+
+  $('exportBtn').onclick = (event) => {
+    event.stopPropagation();
+    if ($('exportMenu').hidden) openExportMenu();
+    else closeExportMenu();
   };
+  $('exportOriginal').onclick = () => exportEpub(false);
+  $('exportTranslated').onclick = () => exportEpub(true);
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('.menu-anchor')) closeExportMenu();
+  });
 
   $('stopBtn').onclick = async () => {
     if (!state.jobId) return;
@@ -1305,10 +1489,34 @@ function wire() {
       $('settingsSheet').hidden = true;
       closeImport();
       closeSummary();
+      closeExportMenu();
     }
   });
 
   window.addEventListener('beforeunload', flushSaves);
+}
+
+function openExportMenu() {
+  const translated = state.project?.translated_count || 0;
+  $('exportTranslated').disabled = !translated;
+  $('exportTranslatedHint').textContent = translated
+    ? 'O que não foi traduzido sai no original'
+    : 'Nada traduzido ainda';
+  $('exportMenu').hidden = false;
+  $('exportBtn').setAttribute('aria-expanded', 'true');
+  // Na etapa de tradução, o mais provável é querer o traduzido.
+  (state.stage === 'translate' && translated ? $('exportTranslated') : $('exportOriginal')).focus();
+}
+
+function closeExportMenu() {
+  $('exportMenu').hidden = true;
+  $('exportBtn').setAttribute('aria-expanded', 'false');
+}
+
+async function exportEpub(translated) {
+  closeExportMenu();
+  await flushSaves();
+  window.location = `/api/projects/${state.project.id}/export?translated=${translated}`;
 }
 
 function setPreviewMode(translated) {

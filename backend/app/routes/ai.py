@@ -193,7 +193,8 @@ async def start_translation(
 ) -> dict[str, Any]:
     """Dispara a tradução em segundo plano e devolve o id da tarefa.
 
-    Por padrão traduz só o que ainda não foi traduzido, para que retomar um
+    Por padrão traduz só o que ainda não foi traduzido, ou cuja tradução ficou
+    desatualizada porque o original mudou (meta.stale), para que retomar um
     trabalho interrompido não gaste tokens de novo. retranslate=true refaz tudo.
     """
     project_store = get_store()
@@ -218,7 +219,7 @@ async def start_translation(
                 continue
             if not block.text.strip():
                 continue
-            if not retranslate and block.translated:
+            if not retranslate and block.translated and not block.meta.get("stale"):
                 continue
             candidates.append(block)
 
@@ -261,6 +262,10 @@ async def start_translation(
     # livro enquanto a tarefa roda, e isso está só no disco.
     initial = {block.id: block.translated for block in candidates}
     written: dict[str, str | None] = {}
+    # Na cópia, None quer dizer "a tarefa ainda não chegou aqui", mesmo num
+    # bloco que já tinha tradução (desatualizada, ou retranslate).
+    for block in candidates:
+        block.translated = None
 
     def persist() -> None:
         project_store.update(
@@ -363,7 +368,7 @@ def _apply_translations(
     """
     on_disk = document.block_index()
     for block in translated_blocks:
-        if block.translated == initial[block.id]:
+        if block.translated is None:
             continue  # a tarefa ainda não traduziu este bloco
         target = on_disk.get(block.id)
         if target is None:
@@ -372,6 +377,12 @@ def _apply_translations(
             continue
         target.translated = block.translated
         written[block.id] = block.translated
+        # Atualizada, se traduziu o original que está lá. Se o usuário mudou o
+        # original durante a tarefa, a tradução já nasce desatualizada.
+        if target.text == block.text:
+            target.meta.pop("stale", None)
+        else:
+            target.meta["stale"] = True
 
 
 def _resolve_provider(settings: Settings, provider_id: str | None):

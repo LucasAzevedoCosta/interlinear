@@ -160,6 +160,10 @@ async def update_blocks(
                       "kind": "paragraph"}]}
 
     Campos ausentes ficam como estão, o que permite salvar só o que mudou.
+
+    Mudar o original de um bloco já traduzido marca a tradução como
+    desatualizada (meta.stale); a próxima tradução refaz o bloco. Gravar uma
+    tradução nova, à mão, desfaz a marca.
     """
     store = get_store()
 
@@ -178,15 +182,25 @@ async def update_blocks(
                 continue
 
             if "text" in update:
-                block.text = str(update["text"])
+                text = str(update["text"])
+                if text != block.text and block.translated:
+                    block.meta["stale"] = True
+                block.text = text
             if "translated" in update:
                 value = update["translated"]
                 block.translated = None if value is None else str(value)
+                block.meta.pop("stale", None)
             if "kind" in update and update["kind"]:
-                block.kind = str(update["kind"])  # type: ignore[assignment]
+                kind = str(update["kind"])
+                # Só entre tipos de texto: virar imagem pediria um arquivo.
+                if kind not in TRANSLATABLE or block.kind not in TRANSLATABLE:
+                    raise HTTPException(400, f"Tipo de bloco inválido: {kind}")
+                block.kind = kind  # type: ignore[assignment]
             if isinstance(update.get("meta"), dict):
                 # Mesclado, não substituído: o editor manda só o que mudou.
                 block.meta = {**block.meta, **update["meta"]}
+                if not block.meta.get("stale"):
+                    block.meta.pop("stale", None)
             changed += 1
         return changed
 
@@ -345,6 +359,9 @@ async def merge_block_with_next(project_id: str, block_id: str) -> dict[str, Any
                 and bool(first.meta.get("edited") or second.meta.get("edited")),
             },
         )
+        merged.meta.pop("stale", None)
+        if translated and (first.meta.get("stale") or second.meta.get("stale")):
+            merged.meta["stale"] = True
         # Id novo de propósito: uma tradução em andamento ainda tem a tradução
         # de cada metade pendente pelo id antigo e não deve gravá-la aqui.
         chapter.blocks[index : index + 2] = [merged]

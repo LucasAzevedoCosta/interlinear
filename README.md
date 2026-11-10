@@ -31,6 +31,11 @@ exportação, então o que aparece na tela é exatamente o que vai para o arquiv
 - **Reconstrói** capítulos, títulos e parágrafos a partir das pistas
   tipográficas do PDF (tamanho de fonte, recuo, espaçamento), descartando
   cabeçalhos correntes e números de página
+- **Separa conversão de tradução.** Na etapa de conversão você corrige o
+  texto que veio do arquivo, o tipo de cada bloco e onde começam os capítulos,
+  e exporta o EPUB sem traduzir nada. Na de tradução, cada original ganha o
+  campo da tradução; mudar um original depois marca a tradução dele como
+  desatualizada, e o próximo **Traduzir** refaz só esses
 - **Edita** parágrafo a parágrafo, com salvamento automático
 - **Mostra a prévia** de cada capítulo como ele vai aparecer no leitor
 - **Traduz** com OpenAI, Anthropic, Google Gemini, qualquer endpoint compatível
@@ -81,10 +86,12 @@ nada responde na rede local.
 1. Arraste um PDF ou EPUB para a área de importação, confira as opções
    (título, onde começam os capítulos, OCR) e acompanhe o progresso. No fim,
    um resumo mostra o que foi encontrado e o que vale conferir
-2. Em **Configurações**, adicione um provedor de IA e cole sua chave
-3. Abra o livro e clique em **Traduzir**
-4. Revise os parágrafos no painel central, conferindo na prévia à direita
-5. **Exportar EPUB**
+2. Na etapa **Conversão**, corrija o que a extração errou, conferindo na
+   prévia à direita. Para só converter, pare aqui e use **Exportar EPUB →
+   Original**
+3. Em **Configurações**, adicione um provedor de IA e cole sua chave
+4. Na etapa **Tradução**, clique em **Traduzir** e revise os parágrafos
+5. **Exportar EPUB → Traduzido**
 
 ### Escolhendo um modelo
 

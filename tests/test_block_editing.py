@@ -120,3 +120,50 @@ def test_inserir_fora_dos_limites_vai_para_a_ponta(client, book):
         f"/api/projects/{book}/chapters/c1/blocks", json={"index": 99}
     ).json()["block"]
     assert _ids(book)[-1] == block["id"]
+
+
+def _patch(client, project_id: str, **fields) -> None:
+    response = client.patch(f"/api/projects/{project_id}/blocks", json={"updates": [fields]})
+    assert response.status_code == 200, response.text
+
+
+def _block(project_id: str, block_id: str) -> Block:
+    return get_store().load_document(project_id).block_index()[block_id]
+
+
+def test_mudar_o_original_desatualiza_a_traducao(client, book):
+    _patch(client, book, id="p1", text="Era uma vez um exem-")  # mesmo texto: nada muda
+    assert "stale" not in _block(book, "p1").meta
+
+    _patch(client, book, id="p1", text="Era uma vez outro exem-")
+    assert _block(book, "p1").meta["stale"] is True
+    assert _block(book, "p1").translated == "Once upon a"  # a tradução fica, marcada
+
+    _patch(client, book, id="p3", text="Fim mesmo.")  # sem tradução: nada a desatualizar
+    assert "stale" not in _block(book, "p3").meta
+
+
+def test_revisar_a_traducao_ou_manter_tira_a_marca(client, book):
+    _patch(client, book, id="p1", text="Outro texto.")
+    _patch(client, book, id="p1", translated="Another text.")
+    assert "stale" not in _block(book, "p1").meta
+
+    _patch(client, book, id="p2", text="Outro texto.")
+    _patch(client, book, id="p2", meta={"stale": False})  # "manter a tradução"
+    assert "stale" not in _block(book, "p2").meta
+
+
+def test_juntar_mantem_a_marca_de_desatualizado(client, book):
+    _patch(client, book, id="p2", text="plo partido de novo.")
+    merged = client.post(f"/api/projects/{book}/blocks/p1/merge-next").json()["block"]
+    assert merged["meta"]["stale"] is True
+
+
+def test_trocar_o_tipo_do_bloco(client, book):
+    _patch(client, book, id="p3", kind="heading2")
+    assert _block(book, "p3").kind == "heading2"
+
+    for blocked in ({"id": "p3", "kind": "image"}, {"id": "img", "kind": "paragraph"}):
+        response = client.patch(f"/api/projects/{book}/blocks", json={"updates": [blocked]})
+        assert response.status_code == 400
+    assert _block(book, "img").kind == "image"

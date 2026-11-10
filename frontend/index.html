@@ -15,6 +15,10 @@
 
     <div class="bar__book" id="bookBar" hidden>
       <input class="bar__title" id="bookTitle" aria-label="Título do livro"/>
+      <span class="toggle stages" role="group" aria-label="Etapa">
+        <button id="stageConvert" aria-pressed="true" title="Revisar o texto e a estrutura que vieram do arquivo">Conversão</button>
+        <button id="stageTranslate" aria-pressed="false" title="Traduzir e revisar a tradução">Tradução</button>
+      </span>
       <span class="bar__stat" id="bookStat"></span>
     </div>
 
@@ -27,7 +31,19 @@
     <div class="bar__actions">
       <button class="btn btn--quiet" id="homeBtn" hidden>Projetos</button>
       <button class="btn" id="translateBtn" hidden>Traduzir</button>
-      <button class="btn" id="exportBtn" hidden>Exportar EPUB</button>
+      <span class="menu-anchor">
+        <button class="btn" id="exportBtn" aria-haspopup="menu" aria-expanded="false" hidden>Exportar EPUB ▾</button>
+        <span class="menu" id="exportMenu" role="menu" hidden>
+          <button role="menuitem" id="exportOriginal">
+            <b>Original</b>
+            <span>O texto do arquivo, com as correções da conversão</span>
+          </button>
+          <button role="menuitem" id="exportTranslated">
+            <b>Traduzido</b>
+            <span id="exportTranslatedHint">O que não foi traduzido sai no original</span>
+          </button>
+        </span>
+      </span>
       <button class="btn btn--quiet" id="settingsBtn">Configurações</button>
     </div>
   </header>
@@ -74,10 +90,11 @@
 
     <aside class="preview" id="preview" hidden>
       <div class="preview__head">
-        <span class="toggle">
+        <span class="toggle" id="previewToggle">
           <button id="viewTranslated" aria-pressed="true">Tradução</button>
           <button id="viewOriginal" aria-pressed="false">Original</button>
         </span>
+        <span id="previewLabel" hidden>Como o original vai sair no leitor</span>
         <span style="flex:1"></span>
         <button class="btn btn--quiet" id="refreshPreview">Atualizar</button>
       </div>

@@ -143,6 +143,38 @@ button {
 
 .bar__actions { display: flex; gap: 6px; align-items: center; }
 
+.stages { flex: 0 0 auto; }
+.stages button { padding: 4px 12px; }
+
+/* Menu suspenso do Exportar. */
+.menu-anchor { position: relative; }
+
+.menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--bench-deep);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.menu button {
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+}
+
+.menu button:hover:not(:disabled), .menu button:focus-visible { background: var(--bench-raised); }
+.menu button:disabled { opacity: 0.45; cursor: not-allowed; }
+.menu b { display: block; font-weight: 600; }
+.menu span { display: block; font-size: 11px; color: var(--on-bench-dim); margin-top: 2px; }
+
 /* --------------------------------------------------------------- buttons */
 
 .btn {
@@ -384,20 +416,69 @@ button {
 .block__tool--danger[data-armed] { border-color: var(--alert); color: var(--alert); }
 .block__tool--danger[data-armed] { background: #fbeeea; }
 
-/* Original editável, só em blocos inseridos pelo usuário. */
-.block__source-field {
+/* Conversão: o original é o texto principal, em tamanho de leitura. Um clique
+   troca a vista formatada pelo campo com o texto cru. */
+.block__text {
+  font-family: var(--text);
+  font-size: 16px;
+  line-height: 1.62;
+  color: var(--ink);
+  margin: 0;
+  white-space: pre-wrap;
+  cursor: text;
+  border-radius: var(--radius);
+}
+
+.block__text:focus-visible { outline-offset: 4px; }
+.block__text[data-empty="true"]::before {
+  content: "texto que faltou na conversão: clique para escrever";
+  color: #b3ada3;
+  font-style: italic;
+}
+
+.block__text-field {
   display: block;
   width: 100%;
   border: none;
-  border-bottom: 1px dashed #ddd9d2;
+  border-bottom: 1px dashed var(--pencil);
   background: none;
   resize: none;
   padding: 0 0 2px;
   overflow: hidden;
+  cursor: auto;
 }
 
-.block__source-field:focus { outline: none; border-bottom-color: var(--pencil); }
-.block__source-field::placeholder { color: #b3ada3; font-style: italic; }
+.block__text-field:focus { outline: none; }
+
+.block[data-kind="heading1"] .block__text { font-size: 22px; font-weight: 600; line-height: 1.3; }
+.block[data-kind="heading2"] .block__text { font-size: 19px; font-weight: 600; line-height: 1.35; }
+.block[data-kind="heading3"] .block__text { font-size: 17px; font-weight: 600; }
+.block[data-kind="quote"] .block__text { font-style: italic; padding-left: 14px; border-left: 2px solid #ddd9d2; }
+.block[data-kind="list_item"] .block__text { padding-left: 14px; }
+.block[data-kind="footnote"] .block__text { font-size: 0.88em; }
+.block[data-kind="table"] .block__text { font-variant-numeric: tabular-nums; }
+
+.block__kind { padding: 1px 4px; }
+
+/* Tradução feita antes de o original mudar. */
+.block[data-state="stale"] { border-left: 2px dashed var(--pending); }
+
+.block__stale {
+  font-size: 12px;
+  color: #8a6a1f;
+  margin: 0 0 6px;
+}
+
+/* Botão com cara de link, dentro de um texto. */
+.editor__link {
+  color: var(--pencil-deep);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  padding: 0;
+  font-size: inherit;
+}
+
+.editor__link:hover { color: var(--pencil); }
 
 /* --------------------------------------------------------------- preview */
 

@@ -218,3 +218,49 @@ def test_apply_translations_respeita_edicao_feita_depois_de_gravar():
     on_disk.block_index()["b1"].translated = "Olá!"
     ai_routes._apply_translations(on_disk, [block], initial, written)
     assert on_disk.block_index()["b1"].translated == "Olá!"
+
+
+def test_traduzir_refaz_so_o_que_ficou_desatualizado(client, provider):
+    project_id, ids = _new_project()
+    assert _wait_job(client, _start(client, project_id))["status"] == "done"
+    calls = provider.calls
+
+    client.patch(
+        f"/api/projects/{project_id}/blocks",
+        json={"updates": [{"id": ids[1], "text": "Paragraph 2, revised."}]},
+    ).raise_for_status()
+    assert _wait_job(client, _start(client, project_id))["status"] == "done"
+
+    assert provider.calls == calls + 1  # um lote: só o bloco desatualizado
+    blocks = get_store().load_document(project_id).block_index()
+    assert blocks[ids[1]].translated == "[pt] Paragraph 2, revised."
+    assert "stale" not in blocks[ids[1]].meta
+
+
+def test_traducao_igual_a_anterior_tambem_tira_a_marca(client, provider):
+    project_id, ids = _new_project(size=1)
+    store = get_store()
+    store.update(project_id, lambda d: setattr(d.all_blocks()[0], "translated", "[pt] Paragraph 1."))
+    store.update(project_id, lambda d: d.all_blocks()[0].meta.update(stale=True))
+
+    assert _wait_job(client, _start(client, project_id))["status"] == "done"
+    block = store.load_document(project_id).block_index()[ids[0]]
+    assert block.translated == "[pt] Paragraph 1."
+    assert "stale" not in block.meta
+
+
+def test_original_mudado_durante_a_traducao_continua_desatualizado(client, provider):
+    project_id, ids = _new_project(size=1)
+    provider.gate.clear()
+    job_id = _start(client, project_id)
+
+    client.patch(
+        f"/api/projects/{project_id}/blocks",
+        json={"updates": [{"id": ids[0], "text": "Paragraph 1, changed."}]},
+    ).raise_for_status()
+    provider.gate.set()
+    assert _wait_job(client, job_id)["status"] == "done"
+
+    block = get_store().load_document(project_id).block_index()[ids[0]]
+    assert block.translated == "[pt] Paragraph 1."  # traduziu o texto antigo
+    assert block.meta["stale"] is True
