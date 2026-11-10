@@ -16,7 +16,7 @@ from reportlab.lib.utils import ImageReader  # noqa: E402
 from reportlab.pdfgen import canvas  # noqa: E402
 
 from app.core import ocr  # noqa: E402
-from app.core.pdf_extract import Line, extract_blocks  # noqa: E402
+from app.core.pdf_extract import ExtractionReport, Line, extract_blocks  # noqa: E402
 
 WIDTH, HEIGHT = A5
 X = 50
@@ -34,34 +34,45 @@ PARAGRAPHS = [
 ]
 
 
-def _scanned(path: Path, pages: int = 2) -> None:
-    """Um PDF só com imagens das páginas: desenha o texto, rasteriza e cola."""
+def _draw_page(c: canvas.Canvas, *, title: bool) -> None:
+    y = HEIGHT - 80
+    if title:
+        c.setFont("Times-Bold", 20)
+        c.drawString(X, y, "Capítulo 1")
+        y -= 50
+    c.setFont("Times-Roman", 12)
+    for lines in PARAGRAPHS:
+        for i, line in enumerate(lines):
+            c.drawString(X + (16 if i == 0 else 0), y, line)
+            y -= 16
+
+
+def _scanned(path: Path, pages: int = 2, *, native: tuple[int, ...] = ()) -> None:
+    """Um PDF com imagens das páginas: desenha o texto, rasteriza e cola.
+
+    As páginas em `native` (contando de 1) ficam com o texto do PDF, sem
+    rasterizar: um PDF misto.
+    """
     import pypdfium2 as pdfium
 
     source = io.BytesIO()
     c = canvas.Canvas(source, pagesize=A5)
     for page in range(pages):
-        y = HEIGHT - 80
-        if page == 0:
-            c.setFont("Times-Bold", 20)
-            c.drawString(X, y, "Capítulo 1")
-            y -= 50
-        c.setFont("Times-Roman", 12)
-        for lines in PARAGRAPHS:
-            for i, line in enumerate(lines):
-                c.drawString(X + (16 if i == 0 else 0), y, line)
-                y -= 16
+        _draw_page(c, title=page == 0)
         c.showPage()
     c.save()
 
     document = pdfium.PdfDocument(source.getvalue())
     out = canvas.Canvas(str(path), pagesize=A5)
     for index in range(len(document)):
-        image = document[index].render(scale=300 / 72).to_pil()
-        buffer = io.BytesIO()
-        image.convert("L").save(buffer, "PNG")
-        buffer.seek(0)
-        out.drawImage(ImageReader(buffer), 0, 0, WIDTH, HEIGHT)
+        if index + 1 in native:
+            _draw_page(out, title=index == 0)
+        else:
+            image = document[index].render(scale=300 / 72).to_pil()
+            buffer = io.BytesIO()
+            image.convert("L").save(buffer, "PNG")
+            buffer.seek(0)
+            out.drawImage(ImageReader(buffer), 0, 0, WIDTH, HEIGHT)
         out.showPage()
     out.save()
     document.close()
@@ -159,3 +170,100 @@ def test_pdf_escaneado_passa_pelo_ocr(tmp_path):
     assert len(texts) == 4
     # A imagem da página escaneada não vira figura do livro.
     assert not images and all(b.kind != "image" for b in blocks)
+
+
+def test_corpo_do_ocr_vira_o_corpo_do_pdf():
+    """Num PDF misto, o corpo do OCR se ajusta ao do texto do PDF, e o título acompanha."""
+    def line(size: float) -> Line:
+        return Line("x", size, False, False, 0, 10, 0, 1, 100)
+
+    lines = [line(s) for s in (12.0, 11.5, 12.0, 18.0)]
+    ocr._snap_body_size(lines, 10.0)
+    assert [l.size for l in lines] == [10.0, 10.0, 10.0, 15.0]
+
+
+def test_pdf_misto_sem_tesseract_fica_com_o_texto_e_avisa(tmp_path, monkeypatch):
+    path = tmp_path / "misto.pdf"
+    _scanned(path, pages=3, native=(1, 3))
+    monkeypatch.setattr(ocr, "available", lambda: False)
+    report = ExtractionReport()
+
+    blocks, _ = extract_blocks(str(path), report=report)
+
+    assert sum(b.kind == "paragraph" for b in blocks) == 4  # 2 por página com texto
+    assert report.pages == 3
+    assert report.scanned_without_ocr == [2]
+    assert report.ocr_pages == []
+
+
+def test_ocr_desligado_em_pdf_sem_texto_explica(tmp_path):
+    path = tmp_path / "escaneado.pdf"
+    _scanned(path, pages=1)
+    with pytest.raises(ValueError, match="OCR está desligado"):
+        extract_blocks(str(path), ocr_mode="off")
+
+
+def test_progresso_da_extracao(tmp_path):
+    path = tmp_path / "nativo.pdf"
+    _scanned(path, pages=2, native=(1, 2))
+    seen: list[tuple[str, int, int]] = []
+
+    extract_blocks(str(path), on_progress=lambda *step: seen.append(step))
+
+    assert seen == [("read", 1, 2), ("read", 2, 2), ("build", 0, 1), ("build", 1, 1)]
+
+
+def test_excecao_no_progresso_cancela_a_extracao(tmp_path):
+    path = tmp_path / "nativo.pdf"
+    _scanned(path, pages=3, native=(1, 2, 3))
+    seen: list[int] = []
+
+    class Cancelled(Exception):
+        pass
+
+    def stop_on_second(stage: str, done: int, total: int) -> None:
+        seen.append(done)
+        if done == 2:
+            raise Cancelled
+
+    with pytest.raises(Cancelled):
+        extract_blocks(str(path), on_progress=stop_on_second)
+    assert seen == [1, 2]  # a terceira página nem é lida
+
+
+@pytest.mark.skipif(not ocr.available(), reason="Tesseract não instalado")
+def test_pdf_misto_faz_ocr_so_das_paginas_escaneadas(tmp_path):
+    path = tmp_path / "misto.pdf"
+    _scanned(path, pages=3, native=(1, 3))
+    images: dict[str, bytes] = {}
+    report = ExtractionReport()
+    stages: list[tuple[str, int, int]] = []
+
+    blocks, _ = extract_blocks(
+        str(path), images=images, report=report, on_progress=lambda *s: stages.append(s)
+    )
+
+    assert report.ocr_pages == [2]
+    assert report.scanned_without_ocr == [] and report.ocr_empty == []
+    assert ("ocr", 1, 1) in stages
+    # A página 2 vem do OCR, no lugar certo, com os mesmos parágrafos.
+    pages = [b.page for b in blocks if b.kind == "paragraph"]
+    assert pages == [1, 1, 2, 2, 3, 3]
+    texts = [b.text for b in blocks if b.kind == "paragraph"]
+    assert texts[2] == texts[0] and texts[3] == texts[1]
+    # O corpo do OCR é o do PDF: o parágrafo escaneado não virou título nem nota.
+    assert [b.kind for b in blocks if b.page == 2] == ["paragraph", "paragraph"]
+    assert not images
+
+
+@pytest.mark.skipif(not ocr.available(), reason="Tesseract não instalado")
+def test_ocr_forcado_ignora_o_texto_do_pdf(tmp_path):
+    path = tmp_path / "nativo.pdf"
+    _scanned(path, pages=1, native=(1,))
+    report = ExtractionReport()
+
+    blocks, _ = extract_blocks(str(path), ocr_mode="force", report=report)
+
+    assert report.ocr_pages == [1]
+    assert blocks[0].text == "Capítulo 1"
+    assert sum(b.kind == "paragraph" for b in blocks) == 2

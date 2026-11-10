@@ -37,8 +37,10 @@ import zlib
 from collections import Counter
 from dataclasses import dataclass, field
 from functools import lru_cache
+from typing import Callable
 
 from pdfminer.high_level import extract_pages
+from pdfminer.pdfpage import PDFPage
 from pdfminer.layout import LAParams, LTChar, LTFigure, LTImage, LTTextContainer, LTTextLine
 from pdfminer.pdftypes import (
     LITERALS_ASCII85_DECODE,
@@ -54,6 +56,15 @@ from pdfminer.psparser import PSLiteral
 from .blocks import Block, Vocabulary, keeps_hyphen, normalize_spaces
 
 log = logging.getLogger(__name__)
+
+# Avisa o andamento: (etapa, feito, total). As etapas são "read" (lendo as
+# páginas), "ocr" e "build" (montando os blocos). Quem chama pode levantar uma
+# exceção aqui dentro para cancelar a extração.
+OnProgress = Callable[[str, int, int], None]
+
+# Uma página sem texto cuja imagem cobre pelo menos esta fração dela é uma
+# página escaneada.
+SCANNED_IMAGE_SHARE = 0.5
 
 # Uma linha precisa ser este tanto maior que o corpo para virar título.
 # Calibrado em livros reais: títulos de capítulo costumam ficar entre 1,4x e
@@ -158,6 +169,26 @@ class PageImage:
     x1: float = 0.0
     # Entre quais linhas da página a imagem entra (ver Line.flow).
     flow: float = 0.0
+    # Fração da página que a imagem cobre.
+    share: float = 0.0
+
+
+@dataclass
+class ExtractionReport:
+    """O que a extração encontrou, para o resumo da importação."""
+
+    pages: int = 0
+    # Páginas lidas pelo OCR.
+    ocr_pages: list[int] = field(default_factory=list)
+    # Páginas que parecem escaneadas mas não passaram pelo OCR (desligado ou
+    # sem Tesseract).
+    scanned_without_ocr: list[int] = field(default_factory=list)
+    # Páginas em que o OCR rodou e não achou texto.
+    ocr_empty: list[int] = field(default_factory=list)
+    # Imagens num formato que o conversor não sabe levar para o EPUB, pela
+    # página em que estão (uma entrada por imagem).
+    skipped_images: list[int] = field(default_factory=list)
+    ocr_languages: str = ""
 
 
 @lru_cache(maxsize=256)
@@ -371,24 +402,46 @@ def _walk_images(element):
             yield from _walk_images(child)
 
 
+def _page_count(pdf_path: str) -> int:
+    with open(pdf_path, "rb") as stream:
+        return sum(1 for _ in PDFPage.get_pages(stream))
+
+
 def _read_lines(
-    pdf_path: str, laparams: LAParams, *, with_images: bool = False
-) -> tuple[list[Line], list[PageImage]]:
-    """Percorre o PDF e devolve as linhas com metadados e, se pedido, as imagens."""
+    pdf_path: str,
+    laparams: LAParams,
+    *,
+    with_images: bool = False,
+    on_progress: OnProgress | None = None,
+    report: ExtractionReport | None = None,
+) -> tuple[list[Line], list[PageImage], list[int]]:
+    """Percorre o PDF e devolve as linhas com metadados e, se pedido, as imagens.
+
+    Devolve também as páginas escaneadas: sem nenhuma linha de texto e com uma
+    imagem que cobre boa parte da página.
+    """
     lines: list[Line] = []
     images: list[PageImage] = []
+    scanned: list[int] = []
+    total = _page_count(pdf_path) if on_progress or report else 0
+    if report is not None:
+        report.pages = total
 
     for page_number, page_layout in enumerate(
         extract_pages(pdf_path, laparams=laparams), start=1
     ):
         page_height = float(page_layout.height) or 1.0
+        page_area = (float(page_layout.width) * page_height) or 1.0
         page_lines: list[Line] = []
         page_images: list[PageImage] = []
+        largest_image = 0.0
 
         for element in page_layout:
-            if with_images and isinstance(element, LTFigure):
+            if isinstance(element, (LTFigure, LTImage)):
                 for image in _walk_images(element):
-                    if min(image.width, image.height) < MIN_IMAGE_POINTS:
+                    share = float(image.width) * float(image.height) / page_area
+                    largest_image = max(largest_image, share)
+                    if not with_images or min(image.width, image.height) < MIN_IMAGE_POINTS:
                         continue
                     payload = _image_payload(image)
                     if payload:
@@ -400,8 +453,11 @@ def _read_lines(
                                 data=payload[1],
                                 x0=float(image.x0),
                                 x1=float(image.x1),
+                                share=share,
                             )
                         )
+                    elif report is not None:
+                        report.skipped_images.append(page_number)
                 continue
 
             if not isinstance(element, LTTextContainer):
@@ -447,10 +503,14 @@ def _read_lines(
                     )
                 )
 
+        if not page_lines and largest_image >= SCANNED_IMAGE_SHARE:
+            scanned.append(page_number)
         lines.extend(_reading_order(page_lines, page_images))
         images.extend(page_images)
+        if on_progress:
+            on_progress("read", page_number, max(total, page_number))
 
-    return lines, images
+    return lines, images, scanned
 
 
 def _find_gutter(lines: list[Line]) -> float | None:
@@ -929,6 +989,10 @@ def extract_blocks(
     *,
     source_name: str | None = None,
     images: dict[str, bytes] | None = None,
+    ocr_mode: str = "auto",
+    ocr_languages: str | None = None,
+    on_progress: OnProgress | None = None,
+    report: ExtractionReport | None = None,
 ) -> tuple[list[Block], str]:
     """Converte um PDF com texto nativo numa lista plana de blocos.
 
@@ -944,9 +1008,18 @@ def extract_blocks(
     bytes, pronto para Document.images) e os blocos ganham os kind="image"
     correspondentes. Sem ele, as imagens são ignoradas, como antes.
 
-    PDF sem texto (escaneado) passa por OCR, se o Tesseract estiver instalado
-    (ver core/ocr.py). Levanta ValueError quando não há como extrair texto.
+    Páginas escaneadas passam por OCR, se o Tesseract estiver instalado (ver
+    core/ocr.py). ocr_mode escolhe quais: "auto" (as escaneadas; todas, se o
+    PDF não tem texto nenhum), "force" (todas, ignorando o texto do PDF) ou
+    "off". ocr_languages troca os idiomas, no formato do Tesseract ("por+eng").
+    Levanta ValueError quando não há como extrair texto.
+
+    on_progress recebe o andamento (ver OnProgress) e report, se informado, o
+    resumo do que foi encontrado.
     """
+    if ocr_mode not in ("auto", "force", "off"):
+        raise ValueError(f"Modo de OCR desconhecido: {ocr_mode}")
+    report = report if report is not None else ExtractionReport()
     laparams = LAParams(
         line_margin=0.4,
         char_margin=2.0,
@@ -955,11 +1028,18 @@ def extract_blocks(
         detect_vertical=False,
     )
 
-    lines, page_images = _read_lines(pdf_path, laparams, with_images=images is not None)
-    if not lines:
-        lines = _ocr_lines(pdf_path)
-        # As imagens de um PDF escaneado são as próprias páginas.
-        page_images = []
+    lines, page_images, scanned = _read_lines(
+        pdf_path,
+        laparams,
+        with_images=images is not None,
+        on_progress=on_progress,
+        report=report,
+    )
+    lines, page_images = _add_ocr_lines(
+        pdf_path, lines, page_images, scanned, ocr_mode, ocr_languages, on_progress, report
+    )
+    if on_progress:
+        on_progress("build", 0, 1)
 
     lines = _strip_running_heads(lines)
     body_size = _body_size(lines)
@@ -1026,23 +1106,88 @@ def extract_blocks(
             # página termina, mesmo que ele continue na seguinte.
             extras.append((note.page, math.inf, block))
 
-    return _merge_positioned(placed, extras), title
+    blocks = _merge_positioned(placed, extras)
+    if on_progress:
+        on_progress("build", 1, 1)
+    return blocks, title
 
 
-def _ocr_lines(pdf_path: str) -> list[Line]:
+def _add_ocr_lines(
+    pdf_path: str,
+    lines: list[Line],
+    page_images: list[PageImage],
+    scanned: list[int],
+    mode: str,
+    languages: str | None,
+    on_progress: OnProgress | None,
+    report: ExtractionReport,
+) -> tuple[list[Line], list[PageImage]]:
+    """Junta às linhas do PDF as das páginas que precisam de OCR."""
     # Importado aqui: ocr.py importa Line deste módulo.
     from . import ocr
 
-    if not ocr.available():
-        raise ValueError(
-            "Nenhum texto extraível encontrado. O PDF provavelmente é "
-            "escaneado e precisa de OCR: instale o Tesseract (a imagem Docker "
-            "já traz) e importe de novo."
-        )
-    lines = ocr.read_lines(pdf_path)
+    with_text = {line.page for line in lines}
+    if mode == "force":
+        pages = list(range(1, (report.pages or _page_count(pdf_path)) + 1))
+        lines = []
+    elif mode == "auto" and not lines:
+        # Nenhum texto: o PDF inteiro é escaneado, mesmo que as imagens não
+        # pareçam páginas (algumas digitalizações cortam a página em faixas).
+        pages = list(range(1, (report.pages or _page_count(pdf_path)) + 1))
+    elif mode == "auto":
+        pages = scanned
+    else:
+        pages = []
+
+    if pages and not ocr.available():
+        if not lines:
+            raise ValueError(
+                "Nenhum texto extraível encontrado. O PDF provavelmente é "
+                "escaneado e precisa de OCR: instale o Tesseract (a imagem Docker "
+                "já traz) e importe de novo."
+            )
+        # PDF misto: o texto que há vale mais que recusar o livro inteiro.
+        report.scanned_without_ocr = list(pages)
+        return lines, page_images
+    if not pages:
+        if not lines:
+            raise ValueError(
+                "Nenhum texto extraível encontrado e o OCR está desligado. "
+                "Importe de novo com o OCR ligado."
+            )
+        report.scanned_without_ocr = list(scanned)
+        return lines, page_images
+
+    report.ocr_languages = ocr.languages(languages)
+    found = ocr.read_lines(
+        pdf_path,
+        pages,
+        langs=languages,
+        # Num PDF misto, o corpo do OCR vira o do texto do PDF: a estimativa do
+        # Tesseract fica perto, mas não igual, e o parágrafo escaneado viraria
+        # título ou nota.
+        body_size=_body_size(lines) if lines else None,
+        on_page=(lambda done, total: on_progress("ocr", done, total)) if on_progress else None,
+    )
+    report.ocr_pages = list(pages)
+    read = {line.page for line in found}
+    report.ocr_empty = [page for page in pages if page not in read]
+
+    # A imagem de uma página escaneada é a própria página, não uma figura.
+    ocr_set = set(pages)
+    def is_scan(page: int, share: float) -> bool:
+        return page in ocr_set and (page not in with_text or share >= SCANNED_IMAGE_SHARE)
+
+    page_images = [image for image in page_images if not is_scan(image.page, image.share)]
+    report.skipped_images = [
+        page for page in report.skipped_images if page not in ocr_set or page in with_text
+    ]
+
+    # Ordenação estável: cada página guarda a ordem de leitura que já tem.
+    lines = sorted(lines + found, key=lambda line: line.page)
     if not lines:
         raise ValueError("O OCR não encontrou texto neste PDF.")
-    return lines
+    return lines, page_images
 
 
 def _table_block(cells: list[Line]) -> Block:

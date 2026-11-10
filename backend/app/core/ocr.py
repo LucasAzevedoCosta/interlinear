@@ -1,4 +1,4 @@
-"""OCR de PDFs escaneados, para quando o PDF não tem texto.
+"""OCR das páginas escaneadas de um PDF.
 
 Cada página é renderizada com pypdfium2 (Apache-2.0/BSD) e lida pelo
 Tesseract (Apache-2.0), chamado como programa externo. O Tesseract devolve
@@ -21,10 +21,12 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from pathlib import Path
+from typing import Callable
 
 from lxml import html as lxml_html
 
@@ -76,44 +78,83 @@ def _installed_languages() -> frozenset[str]:
     return frozenset(line.strip() for line in result.stdout.splitlines()[1:] if line.strip())
 
 
-def languages() -> str:
-    wanted = os.environ.get("INTERLINEAR_OCR_LANGS", DEFAULT_LANGUAGES).split("+")
+def installed_languages() -> list[str]:
+    """Os idiomas do Tesseract instalados, sem o "osd" (detecção de rotação)."""
+    if tesseract_path() is None:
+        return []
+    return sorted(lang for lang in _installed_languages() if lang != "osd")
+
+
+def languages(wanted: str | None = None) -> str:
+    """Os idiomas pedidos (ou os do ambiente) que estão instalados, como "por+eng"."""
+    requested = (wanted or os.environ.get("INTERLINEAR_OCR_LANGS", DEFAULT_LANGUAGES)).split("+")
     installed = _installed_languages()
-    chosen = [lang for lang in wanted if lang in installed]
+    chosen = [lang for lang in requested if lang in installed]
     return "+".join(chosen) or "eng"
 
 
-def read_lines(pdf_path: str) -> list[Line]:
-    """Faz OCR de todas as páginas e devolve as linhas, como _read_lines.
+def read_lines(
+    pdf_path: str,
+    pages: list[int] | None = None,
+    *,
+    langs: str | None = None,
+    body_size: float | None = None,
+    on_page: Callable[[int, int], None] | None = None,
+) -> list[Line]:
+    """Faz OCR das páginas pedidas (todas, sem `pages`) e devolve as linhas.
 
     As páginas são lidas em paralelo, um processo do Tesseract por núcleo, cada
     um limitado a uma thread (OMP_THREAD_LIMIT): é mais rápido que um processo
-    só usando todas.
+    só usando todas. O pdfium não aceita duas renderizações ao mesmo tempo, então
+    cada página é renderizada sob uma trava, já dentro do seu processo de OCR:
+    a renderização de uma corre junto com o OCR das outras.
+
+    on_page(feitas, total) é chamada a cada página lida. Uma exceção levantada
+    nela cancela as páginas que ainda não começaram e sobe daqui.
+
+    body_size, quando informado, vira o tamanho do corpo (ver _snap_body_size).
     """
     import pypdfium2 as pdfium
 
+    lang = languages(langs)
     document = pdfium.PdfDocument(pdf_path)
-    try:
-        lang = languages()
-        log.info("PDF sem texto: OCR de %d páginas (%s)", len(document), lang)
-        with tempfile.TemporaryDirectory(prefix="interlinear-ocr-") as tmp:
-            jobs = []
-            for number in range(len(document)):
-                page = document[number]
-                width, height = page.get_size()
-                image = Path(tmp) / f"{number + 1:05d}.pgm"
-                _render(page, image)
-                page.close()
-                jobs.append((number + 1, image, width, height))
+    numbers = pages or list(range(1, len(document) + 1))
+    render_lock = threading.Lock()
+    log.info("OCR de %d páginas (%s)", len(numbers), lang)
 
-            workers = max(1, min(len(jobs), os.cpu_count() or 1))
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                pages = list(pool.map(lambda job: _ocr_page(*job, lang=lang), jobs))
+    try:
+        with tempfile.TemporaryDirectory(prefix="interlinear-ocr-") as tmp:
+
+            def work(number: int) -> list[Line]:
+                image = Path(tmp) / f"{number:05d}.pgm"
+                with render_lock:
+                    page = document[number - 1]
+                    width, height = page.get_size()
+                    _render(page, image)
+                    page.close()
+                try:
+                    return _ocr_page(number, image, width, height, lang=lang)
+                finally:
+                    image.unlink(missing_ok=True)
+
+            workers = max(1, min(len(numbers), os.cpu_count() or 1))
+            pool = ThreadPoolExecutor(max_workers=workers)
+            try:
+                futures = {pool.submit(work, number): number for number in numbers}
+                by_page: dict[int, list[Line]] = {}
+                for future in as_completed(futures):
+                    by_page[futures[future]] = future.result()
+                    if on_page:
+                        on_page(len(by_page), len(numbers))
+            finally:
+                # Num cancelamento, as páginas na fila nem começam; as que estão
+                # no Tesseract terminam antes de a pasta temporária sumir.
+                pool.shutdown(wait=True, cancel_futures=True)
     finally:
         document.close()
 
-    lines = [line for page in pages for line in page]
-    _snap_body_size(lines)
+    lines = [line for number in sorted(by_page) for line in by_page[number]]
+    _snap_body_size(lines, body_size)
     return lines
 
 
@@ -189,12 +230,19 @@ def parse_hocr(content: bytes, *, page: int, page_height: float) -> list[Line]:
     return lines
 
 
-def _snap_body_size(lines: list[Line]) -> None:
-    """Iguala ao corpo os tamanhos que só diferem dele pelo ruído do OCR."""
+def _snap_body_size(lines: list[Line], target: float | None = None) -> None:
+    """Iguala ao corpo os tamanhos que só diferem dele pelo ruído do OCR.
+
+    Com `target`, o corpo passa a medir `target` e os outros tamanhos mudam na
+    mesma proporção: um título continua tão maior que o corpo quanto era.
+    """
     if not lines:
         return
     # O tamanho mais comum, como em pdf_extract._body_size.
     body = Counter(line.size for line in lines).most_common(1)[0][0]
+    scale = target / body if target and body else 1.0
     for line in lines:
         if abs(line.size - body) <= body * BODY_SNAP:
-            line.size = body
+            line.size = target or body
+        elif scale != 1.0:
+            line.size = round(line.size * scale * 2) / 2

@@ -191,24 +191,37 @@ repetem em três páginas ou mais (logotipos, molduras).
 "MinionPro-It", "Garamond-BoldIt"). Uma fonte itálica com nome que não diz
 isso passa como texto normal.
 
-**PDF escaneado.** Quando o PDF não tem texto nenhum, `core/ocr.py` renderiza
-cada página a 300 dpi com pypdfium2 e passa pelo Tesseract, que devolve hOCR:
-cada linha com posição e uma estimativa do tamanho da letra. Isso vira a mesma
-lista de `Line` de um PDF com texto, e o resto do pipeline (parágrafos,
-títulos, hífen, colunas, notas, tabelas) vale igual.
+**PDF escaneado.** Uma página sem nenhuma linha de texto e com uma imagem que
+cobre pelo menos metade dela (`SCANNED_IMAGE_SHARE`) é uma página escaneada.
+`core/ocr.py` renderiza cada uma a 300 dpi com pypdfium2 e passa pelo
+Tesseract, que devolve hOCR: cada linha com posição e uma estimativa do
+tamanho da letra. Isso vira a mesma lista de `Line` de um PDF com texto, e o
+resto do pipeline (parágrafos, títulos, hífen, colunas, notas, tabelas) vale
+igual.
 
+- Num PDF misto, só as páginas escaneadas passam pelo OCR, e as linhas delas
+  entram no lugar de cada página.
+- Um PDF sem texto nenhum passa inteiro, mesmo que as imagens não pareçam
+  páginas (há digitalizações que cortam a página em faixas).
+- O modo de OCR (`ocr_mode`) é `auto` (o padrão, como acima), `force` (todas
+  as páginas, ignorando o texto do PDF, para quando a camada de texto é lixo)
+  ou `off`.
 - A estimativa de tamanho do Tesseract oscila. Tamanhos até 12% longe do mais
   comum viram o corpo (`BODY_SNAP`), senão cada oscilação partiria o parágrafo.
-- As páginas rodam em paralelo, um Tesseract por núcleo.
-- As imagens do PDF não são extraídas: num escaneado, elas são as próprias
-  páginas.
-- Idiomas em `INTERLINEAR_OCR_LANGS` (padrão `por+eng`); os não instalados são
-  ignorados.
+  Num PDF misto, o corpo do OCR passa a ter o tamanho do corpo do PDF, e os
+  títulos mudam na mesma proporção: sem isso, um corpo estimado em 12 contra
+  um de 10 viraria título.
+- As páginas rodam em paralelo, um Tesseract por núcleo. A renderização de
+  uma corre junto com o OCR das outras.
+- A imagem de uma página escaneada não vira figura do livro: ela é a própria
+  página.
+- Idiomas em `INTERLINEAR_OCR_LANGS` (padrão `por+eng`) ou escolhidos na
+  importação; os não instalados são ignorados.
 
-Não detecta itálico nem negrito (o Tesseract 4+ não informa a fonte). Um PDF
-com texto em algumas páginas e outras escaneadas não passa pelo OCR. Sem o
-Tesseract instalado, o extrator levanta `ValueError` explicando o que
-instalar, em vez de produzir um EPUB vazio.
+Não detecta itálico nem negrito (o Tesseract 4+ não informa a fonte). Sem o
+Tesseract instalado, um PDF sem texto nenhum levanta `ValueError` explicando o
+que instalar, em vez de produzir um EPUB vazio; num PDF misto, o texto que há
+é importado e o resumo da importação lista as páginas que ficaram de fora.
 
 Ficou de fora o `ocrmypdf`, o caminho mais comum: ele depende do Ghostscript,
 que é AGPL (ver `docs/licencas.md`).

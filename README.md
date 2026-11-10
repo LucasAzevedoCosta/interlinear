@@ -195,8 +195,8 @@ write_epub(doc, "livro.epub")
 
 - **PDFs escaneados** passam por OCR, que leva cerca de 1 segundo por página
   por núcleo (um livro de 300 páginas, perto de 1 minuto num computador de 4
-  a 8 núcleos) e não detecta itálico nem negrito. Só PDFs inteiramente sem
-  texto: um PDF com texto em parte das páginas não passa pelo OCR.
+  a 8 núcleos) e não detecta itálico nem negrito. Num PDF misto, só as
+  páginas escaneadas passam pelo OCR.
 - **Duas colunas** são lidas uma depois da outra. Três colunas ou mais, e
   colunas de larguras muito diferentes, ainda saem fora de ordem.
 - **Imagens de PDF só em JPEG e bitmap RGB/cinza.** CMYK, paleta, JPEG 2000 e
