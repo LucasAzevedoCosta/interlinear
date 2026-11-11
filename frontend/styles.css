@@ -850,6 +850,7 @@ button {
 
 .row { display: flex; gap: 10px; }
 .row > * { flex: 1; }
+.row--start > * { flex: 0 0 auto; }
 
 .section-rule {
   border: none;

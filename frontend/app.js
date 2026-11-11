@@ -215,26 +215,15 @@ async function importFile(file, purpose) {
 function fillTranslationFields() {
   const languages = state.importOptions?.languages || [];
   const settings = state.settings || {};
-  const codeOf = (name, fallback) =>
-    languages.find((l) => l.name === (name || '').trim().toLowerCase())?.code || fallback;
 
-  for (const [id, chosen] of [
-    ['importSource', codeOf(settings.source_language, 'en')],
-    ['importTarget', codeOf(settings.target_language, 'pt-BR')],
-  ]) {
-    const select = $(id);
-    select.innerHTML = '';
-    for (const { code, name } of languages) {
-      select.append(new Option(name[0].toUpperCase() + name.slice(1), code, false, code === chosen));
-    }
-  }
+  fillLanguageSelect($('importSource'), languages, languageCode(languages, settings.source_language) || 'en');
+  fillLanguageSelect($('importTarget'), languages, languageCode(languages, settings.target_language) || 'pt-BR');
 
   const providers = settings.providers || [];
   const select = $('importProvider');
   select.innerHTML = '';
   for (const provider of providers) {
-    const label = provider.model ? `${provider.label} · ${provider.model}` : provider.label;
-    select.append(new Option(label, provider.id, false, provider.id === settings.active_provider_id));
+    select.append(new Option(providerLabel(provider), provider.id, false, provider.id === settings.active_provider_id));
   }
   select.disabled = !providers.length;
   if (!providers.length) select.append(new Option('Nenhum configurado', ''));
@@ -242,6 +231,23 @@ function fillTranslationFields() {
     ? 'O livro traduz com este provedor. Se ele for apagado, vale o ativo nas configurações.'
     : 'Adicione um provedor em Configurações antes de traduzir. O livro pode ser importado mesmo assim.';
   syncOcrWithSource();
+}
+
+// Os idiomas chegam como nomes ("inglês") das preferências e do livro, e como
+// códigos ("en") nos campos: a tabela do servidor liga um ao outro.
+function languageCode(languages, name) {
+  return languages.find((l) => l.name === (name || '').trim().toLowerCase())?.code || null;
+}
+
+function fillLanguageSelect(select, languages, chosen) {
+  select.innerHTML = '';
+  for (const { code, name } of languages) {
+    select.append(new Option(name[0].toUpperCase() + name.slice(1), code, false, code === chosen));
+  }
+}
+
+function providerLabel(provider) {
+  return provider.model ? `${provider.label} · ${provider.model}` : provider.label;
 }
 
 // O idioma do livro também é o que o OCR precisa reconhecer.
@@ -756,10 +762,7 @@ function renderEditor() {
         (stale ? ` ${stale} com o original alterado depois da tradução.` : '') +
         ' O texto original fica acima de cada campo.'
       : 'Capítulo sem texto traduzível.';
-    const own = state.project.translation || {};
-    if (own.source_language && own.target_language) {
-      note.textContent += ` Do ${own.source_language} para o ${own.target_language}.`;
-    }
+    note.append(' ', ...bookTranslationLine());
   }
   inner.append(note);
 
@@ -1192,6 +1195,11 @@ function refreshPreview() {
 
 async function startTranslation() {
   if (!state.project) return;
+  // Um livro vindo da conversão ainda não disse de que idioma para qual vai.
+  if (!state.project.translation?.source_language) {
+    openBookTranslation(true);
+    return;
+  }
   await flushSaves();
 
   const whole = confirm(
@@ -1311,6 +1319,106 @@ async function watchExistingJob(projectId) {
       startPolling();
     }
   } catch { /* sem tarefa ativa, segue normalmente */ }
+}
+
+/* ------------------------------------------------- tradução deste livro */
+
+// Idiomas e provedor de cada livro. Valem antes das preferências gerais; sem
+// eles, o primeiro "Traduzir" abre este painel.
+
+function bookProvider() {
+  const providers = state.settings?.providers || [];
+  const own = state.project.translation?.provider_id;
+  return {
+    own: providers.find((p) => p.id === own) || null,
+    active: providers.find((p) => p.id === state.settings?.active_provider_id) || providers[0] || null,
+  };
+}
+
+function bookTranslationLine() {
+  const own = state.project.translation || {};
+  const link = document.createElement('button');
+  link.className = 'editor__link';
+  link.onclick = () => openBookTranslation(false);
+  if (!own.source_language) {
+    link.textContent = 'Escolher idiomas e provedor';
+    return ['Este livro ainda não tem idiomas escolhidos. ', link];
+  }
+  const { own: chosen, active } = bookProvider();
+  const provider = chosen
+    ? `com ${providerLabel(chosen)}`
+    : `com o provedor ativo${active ? ` (${providerLabel(active)})` : ''}`;
+  link.textContent = 'Trocar';
+  return [`Do ${own.source_language} para o ${own.target_language}, ${provider}. `, link];
+}
+
+async function openBookTranslation(thenTranslate) {
+  try {
+    state.importOptions ??= await api('/api/imports/options');
+    if (!state.settings) await loadSettings();
+  } catch (error) {
+    toast(error.message, 'error');
+    return;
+  }
+  const languages = state.importOptions.languages;
+  const own = state.project.translation || {};
+  const settings = state.settings || {};
+  // O que o livro escolheu; senão as preferências gerais; senão o que o
+  // arquivo dizia.
+  const known = (code) => (languages.some((l) => l.code === code) ? code : null);
+  fillLanguageSelect($('bookSource'), languages,
+    languageCode(languages, own.source_language) || languageCode(languages, settings.source_language)
+    || known(state.doc.source_language) || 'en');
+  fillLanguageSelect($('bookTarget'), languages,
+    languageCode(languages, own.target_language) || languageCode(languages, settings.target_language)
+    || known(state.doc.language) || 'pt-BR');
+
+  const select = $('bookProvider');
+  select.innerHTML = '';
+  const { active } = bookProvider();
+  select.append(new Option(
+    `O ativo nas configurações${active ? ` (${providerLabel(active)})` : ': nenhum ainda'}`, ''
+  ));
+  for (const provider of settings.providers || []) {
+    select.append(new Option(providerLabel(provider), provider.id));
+  }
+  select.value = bookProvider().own?.id || '';
+
+  $('bookTranslationNote').textContent = thenTranslate
+    ? 'Antes da primeira tradução, confirme de que idioma para qual este livro vai.'
+    : 'Vale para as próximas traduções deste livro. O que já foi traduzido fica como está.';
+  $('saveAndTranslate').hidden = !thenTranslate;
+  $('saveBookTranslation').className = thenTranslate ? 'btn' : 'btn btn--primary';
+  $('bookTranslationSheet').hidden = false;
+  (thenTranslate ? $('saveAndTranslate') : $('bookSource')).focus();
+}
+
+function closeBookTranslation() {
+  $('bookTranslationSheet').hidden = true;
+}
+
+async function saveBookTranslation(thenTranslate) {
+  const body = {
+    source_language: $('bookSource').value,
+    target_language: $('bookTarget').value,
+    provider_id: $('bookProvider').value,
+  };
+  try {
+    const data = await api(`/api/projects/${state.project.id}/translation`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    state.project = data.project;
+    state.doc.source_language = body.source_language;
+    state.doc.language = body.target_language;
+    closeBookTranslation();
+    renderEditor();
+    if (thenTranslate) startTranslation();
+    else toast('Tradução deste livro salva');
+  } catch (error) {
+    toast(error.message, 'error');
+  }
 }
 
 /* ----------------------------------------------------------- configurações */
@@ -1539,6 +1647,12 @@ function wire() {
   $('importSource').onchange = syncOcrWithSource;
 
   $('startImport').onclick = startImport;
+  $('closeBookTranslation').onclick = closeBookTranslation;
+  $('bookTranslationSheet').onclick = (event) => {
+    if (event.target === $('bookTranslationSheet')) closeBookTranslation();
+  };
+  $('saveBookTranslation').onclick = () => saveBookTranslation(false);
+  $('saveAndTranslate').onclick = () => saveBookTranslation(true);
   $('importOcr').onchange = syncOcrFields;
   const closeImport = () => { state.pendingFile = null; $('importSheet').hidden = true; };
   $('closeImport').onclick = closeImport;
@@ -1613,6 +1727,7 @@ function wire() {
       closeImport();
       closeSummary();
       closeExportMenu();
+      closeBookTranslation();
     }
   });
 

@@ -15,6 +15,8 @@ from ..ai.providers import PROVIDER_CATALOG, build_provider
 from ..ai.translator import Progress, TranslationSettings, Translator
 from ..config import ProviderProfile, Settings
 from ..core.blocks import TRANSLATABLE, Block, Document
+from ..core.importer import LANGUAGES
+from ..core.storage import ProjectMeta
 from ..deps import get_settings_store, get_store
 from ..jobs import registry
 
@@ -336,6 +338,47 @@ async def start_translation(
         "provider": profile.label,
         "model": profile.model,
     }
+
+
+@router.put("/projects/{project_id}/translation")
+async def set_book_translation(
+    project_id: str, payload: dict[str, Any] = Body(...)
+) -> dict[str, Any]:
+    """Escolhe os idiomas e o provedor da tradução deste livro.
+
+    Espera {"source_language": "en", "target_language": "pt-BR",
+    "provider_id": "..."}, com os códigos de core/importer.LANGUAGES. Um
+    provider_id vazio volta a seguir o provedor ativo nas configurações. Os
+    códigos vão para o documento (o EPUB usa), os nomes para o pedido ao modelo.
+    """
+    source = str(payload.get("source_language") or "")
+    target = str(payload.get("target_language") or "")
+    provider_id = str(payload.get("provider_id") or "")
+    for code in (source, target):
+        if code not in LANGUAGES:
+            raise HTTPException(400, f"Idioma desconhecido: {code or '(vazio)'}")
+    if provider_id and get_settings_store().load().get_provider(provider_id) is None:
+        raise HTTPException(400, "Provedor não encontrado. Ele pode ter sido apagado.")
+
+    store = get_store()
+
+    def change_document(document: Document) -> None:
+        document.source_language = source
+        document.language = target
+
+    def change_meta(meta: ProjectMeta) -> None:
+        meta.translation = {
+            "source_language": LANGUAGES[source],
+            "target_language": LANGUAGES[target],
+            **({"provider_id": provider_id} if provider_id else {}),
+        }
+
+    try:
+        await asyncio.to_thread(store.update, project_id, change_document)
+        meta = await asyncio.to_thread(store.update_meta, project_id, change_meta)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(404, "Projeto não encontrado") from exc
+    return {"project": meta.to_dict()}
 
 
 @router.get("/jobs/{job_id}")

@@ -200,6 +200,48 @@
   </div>
 </div>
 
+<!-- Tradução deste livro: idiomas e provedor -->
+<div class="sheet" id="bookTranslationSheet" hidden>
+  <div class="sheet__panel" role="dialog" aria-labelledby="bookTranslationHeading">
+    <div class="sheet__head">
+      <h2 id="bookTranslationHeading">Tradução deste livro</h2>
+      <button class="btn btn--quiet" id="closeBookTranslation">Cancelar</button>
+    </div>
+
+    <p class="import-purpose" id="bookTranslationNote" data-purpose="translate"></p>
+
+    <div class="row">
+      <div class="field">
+        <label for="bookSource">Idioma do livro</label>
+        <select id="bookSource"></select>
+      </div>
+      <div class="field">
+        <label for="bookTarget">Traduzir para</label>
+        <select id="bookTarget"></select>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="bookProvider">Provedor de IA</label>
+      <select id="bookProvider"></select>
+      <p class="field__hint">
+        "O ativo nas configurações" acompanha o que estiver marcado lá. Um
+        provedor escolhido aqui vale só para este livro.
+      </p>
+    </div>
+
+    <p class="field__hint" style="margin-bottom:14px">
+      Estilo, glossário e tamanho do lote continuam nas configurações, iguais
+      para todos os livros.
+    </p>
+
+    <div class="row row--start">
+      <button class="btn btn--primary" id="saveBookTranslation">Salvar</button>
+      <button class="btn btn--primary" id="saveAndTranslate" hidden>Salvar e traduzir</button>
+    </div>
+  </div>
+</div>
+
 <!-- Resumo da importação -->
 <div class="sheet" id="summarySheet" hidden>
   <div class="sheet__panel" role="dialog" aria-labelledby="summaryHeading">

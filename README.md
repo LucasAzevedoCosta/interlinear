@@ -93,7 +93,10 @@ nada responde na rede local.
    prévia à direita. Para só converter, pare aqui e use **Exportar EPUB →
    Original**
 3. Em **Configurações**, adicione um provedor de IA e cole sua chave
-4. Na etapa **Tradução**, clique em **Traduzir** e revise os parágrafos
+4. Na etapa **Tradução**, clique em **Traduzir** e revise os parágrafos. Cada
+   livro guarda os seus idiomas e o seu provedor (troque em **Trocar**, na
+   nota do capítulo); um livro vindo da conversão pergunta isso no primeiro
+   **Traduzir**
 5. **Exportar EPUB → Traduzido**
 
 ### Escolhendo um modelo

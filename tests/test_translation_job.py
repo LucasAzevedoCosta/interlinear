@@ -282,3 +282,39 @@ def test_idiomas_do_livro_valem_antes_das_preferencias(client, provider, monkeyp
     monkeypatch.setattr(provider, "complete", spy)
     assert _wait_job(client, _start(client, project_id))["status"] == "done"
     assert "francês" in prompts[0] and "português europeu" in prompts[0]
+
+
+def _put_translation(client, project_id: str, **body):
+    return client.put(f"/api/projects/{project_id}/translation", json=body)
+
+
+def test_trocar_idiomas_e_provedor_do_livro(client, provider):
+    project_id, _ = _new_project(size=1)
+    response = _put_translation(
+        client, project_id, source_language="de", target_language="pt-BR", provider_id=""
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["project"]["translation"] == {
+        "source_language": "alemão",
+        "target_language": "português brasileiro",
+    }
+    document = get_store().load_document(project_id)
+    assert (document.source_language, document.language) == ("de", "pt-BR")
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"source_language": "xx", "target_language": "pt-BR"},
+        {"source_language": "en", "target_language": ""},
+        {"source_language": "en", "target_language": "pt-BR", "provider_id": "sumiu"},
+    ],
+)
+def test_traducao_do_livro_invalida(client, provider, body):
+    project_id, _ = _new_project(size=1)
+    assert _put_translation(client, project_id, **body).status_code == 400
+
+
+def test_traducao_de_livro_inexistente(client):
+    response = _put_translation(client, "naoexiste", source_language="en", target_language="pt-BR")
+    assert response.status_code == 404

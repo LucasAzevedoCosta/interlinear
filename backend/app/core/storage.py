@@ -160,6 +160,19 @@ class ProjectStore:
             self.save_document(project_id, document)
             return result
 
+    def update_meta(self, project_id: str, change: Callable[[ProjectMeta], None]) -> ProjectMeta:
+        """Lê os metadados, aplica `change` e grava, sob a trava do projeto.
+
+        Levanta FileNotFoundError se o projeto não existe mais.
+        """
+        with _lock_for(project_id):
+            meta = self.get_meta(project_id)
+            if meta is None:
+                raise FileNotFoundError(f"Projeto não encontrado: {project_id}")
+            change(meta)
+            self._write_meta(meta)
+            return meta
+
     def _write_meta(self, meta: ProjectMeta) -> None:
         _atomic_write_json(self._meta_path(meta.id), meta.to_dict())
 
