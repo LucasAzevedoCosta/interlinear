@@ -54,34 +54,123 @@ Abrindo o projeto pela primeira vez, comece pelo [guia](docs/guia.md).
 
 ## Instalação
 
-Requer Python 3.11 ou mais recente.
+Funciona em Windows, macOS e Linux. Há dois caminhos:
+
+| Caminho | Bom para | Precisa de |
+| ------- | -------- | ---------- |
+| [Docker](#com-docker-recomendado) | Quem só quer usar: OCR já incluído, nada a instalar além do Docker | [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows e Mac) ou Docker Engine (Linux) |
+| [Python](#com-python) | Quem quer modificar o código, ou não quer o Docker | Python 3.11 ou mais recente e, para PDFs escaneados, o Tesseract |
+
+Nos dois casos, comece baixando o código:
 
 ```bash
-git clone <url-do-seu-repositorio> interlinear
+git clone https://github.com/LucasAzevedoCosta/interlinear.git
 cd interlinear
-
-python3 -m venv .venv
-source .venv/bin/activate        # no Windows: .venv\Scripts\activate
-
-pip install -r requirements.txt
 ```
 
-Para importar PDFs escaneados, instale também o
-[Tesseract](https://tesseract-ocr.github.io/) com os idiomas dos seus livros
-(`brew install tesseract tesseract-lang` no Mac,
-`apt install tesseract-ocr tesseract-ocr-por` no Debian/Ubuntu). Sem ele, o
-resto funciona e o app avisa ao receber um PDF sem texto. A imagem Docker já
-traz o Tesseract com português e inglês.
+Sem o git, use **Code → Download ZIP** na página do repositório e descompacte.
 
-## Como usar
+### Com Docker (recomendado)
 
 ```bash
+docker compose up -d --build
+```
+
+Abra `http://127.0.0.1:8000`. O primeiro build leva alguns minutos; os
+seguintes reaproveitam o que já foi baixado. A porta é publicada só em
+`127.0.0.1`, ou seja, nada responde na rede local.
+
+- **Dados:** projetos e preferências ficam no volume `interlinear-data`
+  (montado em `/data`), e sobrevivem a rebuilds. `docker compose down -v`
+  apaga tudo.
+- **Chaves:** crie um arquivo `.env` ao lado do `compose.yaml` com
+  `INTERLINEAR_OPENAI_KEY=...` e afins. O `.env` está no `.gitignore`.
+- **IA local:** o container alcança Ollama e LM Studio do seu computador por
+  `host.docker.internal`, já configurado. O LM Studio precisa estar servindo
+  na rede (opção *Serve on Local Network*), não só em `localhost`.
+- **OCR:** a imagem já traz o Tesseract com português e inglês.
+- **Logs:** `docker compose logs -f`
+- **Parar:** `docker compose down`
+- **Atualizar:** `git pull` e `docker compose up -d --build` de novo.
+
+### Com Python
+
+Primeiro confira a versão com `python3 --version` (no Windows,
+`py --version`). Se for menor que 3.11:
+
+| Sistema | Como instalar o Python |
+| ------- | ---------------------- |
+| Windows | `winget install Python.Python.3.12`, ou o instalador de [python.org](https://www.python.org/downloads/) marcando *Add python.exe to PATH* |
+| macOS | `brew install python@3.12` (o `python3` que vem com o macOS é antigo demais) |
+| Debian/Ubuntu | `sudo apt install python3.12 python3.12-venv`, ou o pacote `python3` se a sua versão já for 3.11+ |
+| Fedora | `sudo dnf install python3.12` |
+
+Depois, um comando cria o ambiente virtual e instala as dependências na
+primeira vez, e sobe o servidor nas seguintes:
+
+```bash
+./run.sh          # macOS e Linux
+```
+
+```powershell
+.\run.ps1         # Windows (PowerShell)
+```
+
+Se o PowerShell recusar o script, rode uma vez
+`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+
+Abra `http://127.0.0.1:8000`. Para parar, `Ctrl+C` no terminal.
+
+#### Sem os scripts
+
+O mesmo que os scripts fazem, passo a passo:
+
+```bash
+python3 -m venv .venv                 # Windows: py -3.12 -m venv .venv
+source .venv/bin/activate             # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
 cd backend
 python -m uvicorn app.main:app --port 8000
 ```
 
-Abra `http://127.0.0.1:8000`. O servidor escuta só em `127.0.0.1`, ou seja,
-nada responde na rede local.
+#### OCR para PDFs escaneados (opcional)
+
+Sem o [Tesseract](https://tesseract-ocr.github.io/), todo o resto funciona e
+o app avisa ao receber um PDF sem texto. Instale com os idiomas dos seus
+livros:
+
+| Sistema | Comando |
+| ------- | ------- |
+| Windows | `winget install UB-Mannheim.TesseractOCR`, ou o [instalador da UB Mannheim](https://github.com/UB-Mannheim/tesseract/wiki). Marque *Portuguese* em *Additional language data*. Veja a nota abaixo |
+| macOS | `brew install tesseract tesseract-lang` |
+| Debian/Ubuntu | `sudo apt install tesseract-ocr tesseract-ocr-por` |
+| Fedora | `sudo dnf install tesseract tesseract-langpack-por` |
+
+No Windows o instalador não coloca o Tesseract no `PATH`. Ou acrescente
+`C:\Program Files\Tesseract-OCR` ao `PATH`, ou aponte direto para ele antes
+de subir o app:
+
+```powershell
+$env:INTERLINEAR_TESSERACT = "C:\Program Files\Tesseract-OCR\tesseract.exe"
+.\run.ps1
+```
+
+### Onde ficam os dados
+
+Projetos e preferências (inclusive as chaves de API salvas pela tela) ficam
+fora da pasta do código:
+
+| Sistema | Pasta |
+| ------- | ----- |
+| Windows | `%APPDATA%\interlinear` |
+| macOS | `~/Library/Application Support/interlinear` |
+| Linux | `$XDG_DATA_HOME/interlinear`, em geral `~/.local/share/interlinear` |
+| Docker | volume `interlinear-data` |
+
+`INTERLINEAR_DATA_DIR` troca a pasta.
+
+## Como usar
 
 1. Escolha a caixa: **Converter** (PDF em EPUB, sem tradução) ou
    **Traduzir** (um EPUB, ou um PDF que é convertido antes). Confira as
@@ -122,30 +211,11 @@ Baggins = Bolseiro
 O glossário é injetado em todo lote enviado ao modelo, que é o que mantém nomes
 e termos iguais do começo ao fim do livro.
 
-## Rodando com Docker
-
-```bash
-docker compose up -d --build
-```
-
-Abra `http://127.0.0.1:8000`. A porta é publicada só em `127.0.0.1`, como na
-execução direta.
-
-- **Dados:** projetos e preferências ficam no volume `interlinear-data`
-  (montado em `/data`), e sobrevivem a rebuilds. `docker compose down -v`
-  apaga tudo.
-- **Chaves:** crie um arquivo `.env` ao lado do `compose.yaml` com
-  `INTERLINEAR_OPENAI_KEY=...` e afins. O `.env` está no `.gitignore`.
-- **IA local:** o container alcança Ollama e LM Studio do seu computador por
-  `host.docker.internal`, já configurado. O LM Studio precisa estar servindo
-  na rede (opção *Serve on Local Network*), não só em `localhost`.
-- **Logs:** `docker compose logs -f`
-
 ## Variáveis de ambiente
 
 | Variável                    | Para quê                                          |
 | --------------------------- | ------------------------------------------------- |
-| `INTERLINEAR_DATA_DIR`      | Onde ficam projetos e preferências                |
+| `INTERLINEAR_DATA_DIR`      | Pasta de projetos e preferências (padrão acima)   |
 | `INTERLINEAR_HOST`          | Endereço de escuta (padrão `127.0.0.1`)           |
 | `INTERLINEAR_PORT`          | Porta (padrão `8000`)                             |
 | `INTERLINEAR_ALLOWED_HOSTS` | Nomes extras aceitos no `Host`, separados por vírgula (`*` desliga a checagem) |
@@ -163,6 +233,8 @@ Usar as variáveis de ambiente evita gravar chave nenhuma em disco.
 
 ## Testes
 
+Com o ambiente virtual ativo (veja [Sem os scripts](#sem-os-scripts)):
+
 ```bash
 pip install -r requirements-dev.txt
 pytest
@@ -171,6 +243,16 @@ pytest
 A suíte gera um PDF de teste com as armadilhas que aparecem em livros reais —
 cabeçalho corrente, numeração, parágrafo que atravessa a quebra de página,
 diálogo com travessão — e confere o caminho completo até o EPUB e de volta.
+Os testes de OCR são pulados quando o Tesseract não está instalado. A CI roda
+a suíte em Linux, macOS e Windows.
+
+## Contribuindo
+
+Contribuições são bem-vindas: correções, suporte a mais layouts de PDF, novos
+provedores de IA, traduções da interface. Antes de abrir um pull request, leia
+o [CONTRIBUTING.md](CONTRIBUTING.md), que explica como preparar o ambiente, as
+regras da arquitetura e o padrão dos commits. Para relatar uma falha de
+segurança, siga o [SECURITY.md](SECURITY.md) em vez de abrir uma issue.
 
 ## Como está organizado
 
