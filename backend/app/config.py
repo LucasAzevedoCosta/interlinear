@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -34,10 +35,13 @@ def data_root() -> Path:
     if override:
         return Path(override).expanduser()
 
-    # No macOS o lugar convencional é Application Support.
+    # O lugar convencional muda por sistema: Application Support no macOS,
+    # %APPDATA% no Windows e XDG no resto. os.uname() não existe no Windows.
     home = Path.home()
-    if os.uname().sysname == "Darwin":
+    if sys.platform == "darwin":
         return home / "Library" / "Application Support" / APP_NAME
+    if sys.platform == "win32":
+        return Path(os.environ.get("APPDATA", home / "AppData" / "Roaming")) / APP_NAME
     return Path(os.environ.get("XDG_DATA_HOME", home / ".local" / "share")) / APP_NAME
 
 

@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app.config import ProviderProfile, Settings, SettingsStore  # noqa: E402
+from app.config import ProviderProfile, Settings, SettingsStore, data_root  # noqa: E402
 from app.deps import reset_caches  # noqa: E402
 
 
@@ -49,6 +49,7 @@ def test_api_nunca_devolve_a_chave_inteira(client):
     assert provider["key_hint"] == "…1234"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows não tem permissões POSIX")
 def test_arquivo_de_chaves_so_o_dono_le(client, tmp_path):
     _add_provider(client)
 
@@ -67,6 +68,24 @@ def test_variavel_de_ambiente_tem_prioridade(monkeypatch):
     # Tipos sem variável própria (locais) usam a chave salva.
     local = ProviderProfile(id="l", label="l", kind="ollama", api_key="")
     assert settings.resolved_key(local) == ""
+
+
+@pytest.mark.parametrize(
+    ("platform", "expected"),
+    [
+        ("darwin", Path("casa/Library/Application Support/interlinear")),
+        ("win32", Path("roaming/interlinear")),
+        ("linux", Path("xdg/interlinear")),
+    ],
+)
+def test_pasta_de_dados_segue_o_sistema(platform, expected, tmp_path, monkeypatch):
+    monkeypatch.delenv("INTERLINEAR_DATA_DIR", raising=False)
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "casa")
+    monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+
+    assert data_root() == tmp_path / expected
 
 
 def test_preferencias_corrompidas_nao_impedem_de_abrir(tmp_path):

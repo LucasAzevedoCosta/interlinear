@@ -14,13 +14,21 @@ permissions:
 
 jobs:
   testes:
-    name: Testes (Python ${{ matrix.python }})
-    runs-on: ubuntu-latest
+    name: Testes (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         # 3.11 é o mínimo do pyproject.toml; 3.12 é a versão da imagem Docker.
+        os: [ubuntu-latest]
         python: ["3.11", "3.12"]
+        # macOS e Windows rodam o app direto, sem Docker. Os testes de OCR
+        # se pulam sozinhos onde o Tesseract não está instalado.
+        include:
+          - os: macos-latest
+            python: "3.12"
+          - os: windows-latest
+            python: "3.12"
     steps:
       - uses: actions/checkout@v4
 
@@ -31,6 +39,7 @@ jobs:
           cache-dependency-path: requirements*.txt
 
       - name: Instala o Tesseract (OCR)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-por
