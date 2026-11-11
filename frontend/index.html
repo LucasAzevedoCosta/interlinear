@@ -53,17 +53,37 @@
     <!-- Tela inicial: importar ou retomar -->
     <section class="start" id="start">
       <div class="start__inner">
-        <h1>Converta, revise e traduza um livro inteiro</h1>
+        <h1>Converta um PDF em EPUB ou traduza um livro inteiro</h1>
         <p class="lede">
-          Importe um PDF ou EPUB. O Interlinear reconstrói capítulos e parágrafos,
-          traduz com o modelo que você escolher e mostra cada página como ela
-          vai sair no leitor.
+          Escolha onde importar. Um livro convertido pode ser traduzido depois,
+          e um livro em tradução continua com a etapa de conversão para corrigir
+          o texto. A prévia mostra cada página como ela vai sair no leitor.
         </p>
 
-        <div class="drop" id="drop">
-          <button class="btn btn--primary" id="pickBtn">Escolher arquivo</button>
-          <p class="drop__hint">ou arraste um .pdf ou .epub para cá</p>
-          <input type="file" id="fileInput" accept=".pdf,.epub" hidden/>
+        <div class="drops">
+          <section class="drop" data-purpose="convert" aria-labelledby="dropConvertTitle">
+            <p class="drop__kicker">Converter</p>
+            <h2 class="drop__title" id="dropConvertTitle">PDF em EPUB</h2>
+            <p class="drop__text">
+              Reconstrói capítulos, títulos e parágrafos para você revisar e
+              exportar o EPUB. Nada é traduzido.
+            </p>
+            <button class="btn btn--primary" data-pick="convert">Escolher PDF</button>
+            <p class="drop__hint">ou arraste um .pdf para cá</p>
+            <input type="file" id="fileConvert" accept=".pdf" hidden/>
+          </section>
+
+          <section class="drop" data-purpose="translate" aria-labelledby="dropTranslateTitle">
+            <p class="drop__kicker">Traduzir</p>
+            <h2 class="drop__title" id="dropTranslateTitle">Um livro inteiro</h2>
+            <p class="drop__text">
+              Um EPUB, ou um PDF que é convertido antes. Traduz com o modelo que
+              você escolher, para revisar ao lado do original.
+            </p>
+            <button class="btn btn--primary" data-pick="translate">Escolher PDF ou EPUB</button>
+            <p class="drop__hint">ou arraste um .pdf ou .epub para cá</p>
+            <input type="file" id="fileTranslate" accept=".pdf,.epub" hidden/>
+          </section>
         </div>
 
         <div class="imports" id="importList" aria-live="polite"></div>
@@ -115,11 +135,31 @@
     </div>
 
     <p class="import-file" id="importFileName"></p>
+    <p class="import-purpose" id="importPurpose"></p>
 
     <div class="field">
       <label for="importTitle">Título do livro</label>
       <input type="text" id="importTitle"/>
       <p class="field__hint" id="importTitleHint"></p>
+    </div>
+
+    <div class="translate-only">
+      <div class="row">
+        <div class="field">
+          <label for="importSource">Idioma do livro</label>
+          <select id="importSource"></select>
+        </div>
+        <div class="field">
+          <label for="importTarget">Traduzir para</label>
+          <select id="importTarget"></select>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="importProvider">Provedor de IA</label>
+        <select id="importProvider"></select>
+        <p class="field__hint" id="importProviderHint"></p>
+      </div>
     </div>
 
     <div class="pdf-only">

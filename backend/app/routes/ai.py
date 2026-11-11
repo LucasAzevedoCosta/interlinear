@@ -205,7 +205,15 @@ async def start_translation(
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(404, "Projeto não encontrado") from exc
 
-    provider, profile = _resolve_provider(settings, payload.get("provider_id"))
+    # O que o livro guardou na importação para tradução vale antes das
+    # preferências gerais; o que vem no pedido vale antes dos dois.
+    meta = project_store.get_meta(project_id)
+    own = meta.translation if meta else {}
+    provider_id = payload.get("provider_id")
+    # Um provedor escolhido na importação e apagado depois cai no ativo.
+    if not provider_id and own.get("provider_id") and settings.get_provider(own["provider_id"]):
+        provider_id = own.get("provider_id")
+    provider, profile = _resolve_provider(settings, provider_id)
 
     retranslate = bool(payload.get("retranslate"))
     chapter_ids = payload.get("chapter_ids") or []
@@ -235,10 +243,14 @@ async def start_translation(
 
     translation_settings = TranslationSettings(
         source_language=str(
-            payload.get("source_language") or settings.source_language
+            payload.get("source_language")
+            or own.get("source_language")
+            or settings.source_language
         ),
         target_language=str(
-            payload.get("target_language") or settings.target_language
+            payload.get("target_language")
+            or own.get("target_language")
+            or settings.target_language
         ),
         glossary={str(k): str(v) for k, v in glossary.items()},
         style_notes=str(payload.get("style_notes") or settings.style_notes),

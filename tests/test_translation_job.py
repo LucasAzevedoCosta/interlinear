@@ -264,3 +264,21 @@ def test_original_mudado_durante_a_traducao_continua_desatualizado(client, provi
     block = get_store().load_document(project_id).block_index()[ids[0]]
     assert block.translated == "[pt] Paragraph 1."  # traduziu o texto antigo
     assert block.meta["stale"] is True
+
+
+def test_idiomas_do_livro_valem_antes_das_preferencias(client, provider, monkeypatch):
+    project_id, _ = _new_project(size=1)
+    store = get_store()
+    meta = store.get_meta(project_id)
+    meta.translation = {"source_language": "francês", "target_language": "português europeu"}
+    store._write_meta(meta)
+    prompts: list[str] = []
+    original = provider.complete
+
+    async def spy(messages, *, client):
+        prompts.append(" ".join(m.content for m in messages))
+        return await original(messages, client=client)
+
+    monkeypatch.setattr(provider, "complete", spy)
+    assert _wait_job(client, _start(client, project_id))["status"] == "done"
+    assert "francês" in prompts[0] and "português europeu" in prompts[0]

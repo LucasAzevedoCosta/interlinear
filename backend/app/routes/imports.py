@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from ..core import ocr
-from ..core.importer import import_file
+from ..core.importer import LANGUAGES, import_file
 from ..deps import get_store
 from ..jobs import ImportCancelled, imports
 from .projects import MAX_UPLOAD_BYTES, import_options, read_upload
@@ -39,6 +39,7 @@ async def import_choices() -> dict[str, Any]:
             "languages": await asyncio.to_thread(ocr.installed_languages) if available else [],
             "default": await asyncio.to_thread(ocr.languages) if available else "",
         },
+        "languages": [{"code": code, "name": name} for code, name in LANGUAGES.items()],
         "max_upload_bytes": MAX_UPLOAD_BYTES,
     }
 
@@ -50,10 +51,25 @@ async def start_import(
     title: str = Form(""),
     ocr_mode: str = Form("auto"),
     ocr_languages: str = Form(""),
+    purpose: str = Form(""),
+    source_language: str = Form(""),
+    target_language: str = Form(""),
+    provider_id: str = Form(""),
 ) -> dict[str, Any]:
+    """Começa a importar. `purpose` diz em qual das duas caixas o arquivo entrou."""
     data, suffix, filename = await read_upload(file)
-    options = import_options(title, split_on, ocr_mode, ocr_languages)
-    job = imports.create(uuid.uuid4().hex[:12], filename)
+    options = import_options(
+        suffix,
+        title=title,
+        split_on=split_on,
+        ocr_mode=ocr_mode,
+        ocr_languages=ocr_languages,
+        purpose=purpose,
+        source_language=source_language,
+        target_language=target_language,
+        provider_id=provider_id,
+    )
+    job = imports.create(uuid.uuid4().hex[:12], filename, purpose=options.purpose)
     store = get_store()
 
     async def run() -> None:
@@ -71,6 +87,8 @@ async def start_import(
                 source_filename=filename,
                 source_bytes=data,
                 import_summary=summary,
+                purpose=options.purpose,
+                translation=options.translation(),
             )
             job.project_id = meta.id
             status = "done"

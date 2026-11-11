@@ -45,6 +45,10 @@ async def create_project(
     title: str = Form(""),
     ocr_mode: str = Form("auto"),
     ocr_languages: str = Form(""),
+    purpose: str = Form(""),
+    source_language: str = Form(""),
+    target_language: str = Form(""),
+    provider_id: str = Form(""),
 ) -> dict[str, Any]:
     """Importa um PDF ou EPUB de uma vez e cria um projeto editável.
 
@@ -52,7 +56,17 @@ async def create_project(
     mostra o progresso. Esta rota fica para scripts.
     """
     data, suffix, filename = await read_upload(file)
-    options = import_options(title, split_on, ocr_mode, ocr_languages)
+    options = import_options(
+        suffix,
+        title=title,
+        split_on=split_on,
+        ocr_mode=ocr_mode,
+        ocr_languages=ocr_languages,
+        purpose=purpose,
+        source_language=source_language,
+        target_language=target_language,
+        provider_id=provider_id,
+    )
 
     # Extrair um PDF leva de segundos a minutos de CPU. Fora do loop de eventos,
     # para que traduções em andamento e o resto da interface continuem respondendo.
@@ -73,6 +87,8 @@ async def create_project(
         source_filename=filename,
         source_bytes=data,
         import_summary=summary,
+        purpose=options.purpose,
+        translation=options.translation(),
     )
     return {"project": meta.to_dict()}
 
@@ -97,19 +113,37 @@ _LANGUAGE_SPEC = re.compile(r"^[A-Za-z_]+(\+[A-Za-z_]+)*$")
 
 
 def import_options(
-    title: str, split_on: str, ocr_mode: str, ocr_languages: str
+    suffix: str,
+    *,
+    title: str,
+    split_on: str,
+    ocr_mode: str,
+    ocr_languages: str,
+    purpose: str,
+    source_language: str,
+    target_language: str,
+    provider_id: str,
 ) -> ImportOptions:
+    """Os campos do formulário de importação, conferidos. Erros viram 400.
+
+    Sem `purpose`, um PDF é importado para conversão e um EPUB para tradução,
+    o único objetivo que um EPUB aceita.
+    """
     options = ImportOptions(
         title=title.strip(),
         split_on=split_on,
         ocr_mode=ocr_mode,
         ocr_languages=ocr_languages.strip() or None,
+        purpose=purpose or ("convert" if suffix == ".pdf" else "translate"),
+        source_language=source_language.strip(),
+        target_language=target_language.strip(),
+        provider_id=provider_id.strip(),
     )
     # Vai para a linha de comando do Tesseract: só letras, "_" e "+".
     if options.ocr_languages and not _LANGUAGE_SPEC.match(options.ocr_languages):
         raise HTTPException(400, "Idiomas do OCR inválidos")
     try:
-        options.validate()
+        options.validate(suffix)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return options

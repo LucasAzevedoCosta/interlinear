@@ -131,6 +131,7 @@ class ImportCancelled(Exception):
 class ImportJob:
     id: str
     filename: str
+    purpose: str = "convert"
     status: str = "running"  # running | done | error | stopped
     # read (lendo as páginas) | ocr | build (montando capítulos) | save
     stage: str = "read"
@@ -165,6 +166,7 @@ class ImportJob:
         return {
             "id": self.id,
             "filename": self.filename,
+            "purpose": self.purpose,
             "status": self.status,
             "stage": self.stage,
             "done": self.done,
@@ -184,8 +186,8 @@ class ImportRegistry:
     def __init__(self) -> None:
         self._jobs: dict[str, ImportJob] = {}
 
-    def create(self, job_id: str, filename: str) -> ImportJob:
-        job = ImportJob(id=job_id, filename=filename)
+    def create(self, job_id: str, filename: str, *, purpose: str = "convert") -> ImportJob:
+        job = ImportJob(id=job_id, filename=filename, purpose=purpose)
         self._jobs[job_id] = job
         self._prune()
         return job

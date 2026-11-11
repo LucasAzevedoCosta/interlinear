@@ -83,9 +83,12 @@ python -m uvicorn app.main:app --port 8000
 Abra `http://127.0.0.1:8000`. O servidor escuta só em `127.0.0.1`, ou seja,
 nada responde na rede local.
 
-1. Arraste um PDF ou EPUB para a área de importação, confira as opções
-   (título, onde começam os capítulos, OCR) e acompanhe o progresso. No fim,
-   um resumo mostra o que foi encontrado e o que vale conferir
+1. Escolha a caixa: **Converter** (PDF em EPUB, sem tradução) ou
+   **Traduzir** (um EPUB, ou um PDF que é convertido antes). Confira as
+   opções (título, onde começam os capítulos, OCR e, para traduzir, os
+   idiomas e o provedor) e acompanhe o progresso. No fim, um resumo mostra o
+   que foi encontrado e o que vale conferir. Cada caixa abre o livro na sua
+   etapa, mas as duas continuam disponíveis em qualquer livro
 2. Na etapa **Conversão**, corrija o que a extração errou, conferindo na
    prévia à direita. Para só converter, pare aqui e use **Exportar EPUB →
    Original**

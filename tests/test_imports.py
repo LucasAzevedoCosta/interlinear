@@ -202,3 +202,79 @@ def test_resumo_de_epub_nao_fala_de_paginas():
     summary = build_summary(document, None, ImportOptions(), 0.1)
     assert summary["source_kind"] == "epub" and summary["pages"] is None
     assert summary["warnings"] == []
+
+
+def _epub_bytes() -> bytes:
+    import tempfile
+
+    from app.core.epub_write import write_epub
+
+    document = Document(
+        title="Livro",
+        chapters=[Chapter(title="Um", blocks=[Block(kind="paragraph", text="Hello.")])],
+    )
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "livro.epub"
+        write_epub(document, path, use_translation=False)
+        return path.read_bytes()
+
+
+def test_conversao_recebe_so_pdf(client):
+    response = client.post(
+        "/api/imports",
+        files={"file": ("livro.epub", _epub_bytes(), "application/epub+zip")},
+        data={"purpose": "convert"},
+    )
+    assert response.status_code == 400
+    assert "só PDF" in response.json()["detail"]
+
+
+def test_importar_para_traduzir_guarda_objetivo_idiomas_e_provedor(client):
+    job = _start(
+        client, "livro.epub", _epub_bytes(),
+        purpose="translate", source_language="fr", target_language="pt-PT", provider_id="p1",
+    )
+    assert job["purpose"] == "translate"
+    job = _wait(client, job["id"])
+    assert job["status"] == "done", job["error"]
+
+    project = client.get(f"/api/projects/{job['project_id']}").json()
+    meta = project["project"]
+    assert meta["purpose"] == "translate"
+    assert meta["translation"] == {
+        "source_language": "francês",
+        "target_language": "português europeu",
+        "provider_id": "p1",
+    }
+    # Os códigos vão para o EPUB exportado.
+    assert project["document"]["source_language"] == "fr"
+    assert project["document"]["language"] == "pt-PT"
+
+
+def test_importar_para_converter_nao_guarda_traducao(client, pdf_bytes):
+    job = _wait(client, _start(client, "livro.pdf", pdf_bytes, purpose="convert",
+                               source_language="fr")["id"])
+    meta = client.get(f"/api/projects/{job['project_id']}").json()["project"]
+    assert meta["purpose"] == "convert"
+    assert meta["translation"] == {}
+
+
+def test_sem_objetivo_epub_vai_para_traducao(client):
+    response = client.post(
+        "/api/projects", files={"file": ("livro.epub", _epub_bytes(), "application/epub+zip")}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["project"]["purpose"] == "translate"
+
+
+@pytest.mark.parametrize("form", [{"purpose": "ler"}, {"purpose": "translate", "target_language": "klingon"}])
+def test_objetivo_e_idioma_invalidos(client, form):
+    response = client.post(
+        "/api/imports", files={"file": ("x.pdf", b"%PDF-1.4", "application/pdf")}, data=form
+    )
+    assert response.status_code == 400
+
+
+def test_opcoes_trazem_os_idiomas_do_livro(client):
+    languages = client.get("/api/imports/options").json()["languages"]
+    assert {"code": "pt-BR", "name": "português brasileiro"} in languages

@@ -578,6 +578,82 @@ button {
 
 .drop__hint { color: var(--on-bench-dim); font-size: 13px; margin: 10px 0 0; }
 
+/* Duas caixas: converter e traduzir. O objetivo fica escrito em cada uma, e a
+   cor da etiqueta se repete na lista de livros. */
+.drops {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.drops .drop {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  padding: 22px 22px 20px;
+  border-top: 2px solid var(--purpose, var(--rule));
+}
+
+.drop[data-purpose="convert"]   { --purpose: #7f8a99; }
+.drop[data-purpose="translate"] { --purpose: var(--pencil); }
+
+.drop__kicker {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--purpose);
+  margin: 0 0 4px;
+}
+
+.drop__title {
+  font-family: var(--text);
+  font-size: 20px;
+  font-weight: 400;
+  margin: 0 0 8px;
+}
+
+.drop__text {
+  color: var(--on-bench-dim);
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0 0 18px;
+  flex: 1;
+}
+
+@media (max-width: 720px) {
+  .drops { grid-template-columns: 1fr; }
+}
+
+.tag {
+  display: inline-block;
+  flex: 0 0 auto;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  margin-right: 8px;
+  min-width: 82px;
+  text-align: center;
+  border-radius: var(--radius);
+  border: 1px solid var(--rule);
+  color: var(--on-bench-dim);
+  vertical-align: 2px;
+}
+
+.tag[data-purpose="translate"] { border-color: var(--pencil-deep); color: #9dbde3; }
+
+.import-purpose {
+  font-size: 13px;
+  line-height: 1.5;
+  margin: -10px 0 18px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--rule);
+  background: var(--bench-deep);
+}
+
+.import-purpose[data-purpose="translate"] { border-left-color: var(--pencil); }
+
 /* Importações em andamento, logo abaixo da área de soltar. */
 .imports:not(:empty) { margin-top: 16px; }
 

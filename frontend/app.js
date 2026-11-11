@@ -35,6 +35,7 @@ const state = {
   importTimer: null,
   importOptions: null,
   pendingFile: null,
+  pendingPurpose: 'convert',
 };
 
 /* ------------------------------------------------------------------ rede */
@@ -99,6 +100,7 @@ function renderProjects() {
     const row = document.createElement('div');
     row.className = 'project';
 
+    const purpose = projectPurpose(project);
     const name = document.createElement('button');
     name.className = 'project__name';
     name.textContent = project.title;
@@ -106,11 +108,22 @@ function renderProjects() {
 
     const meta = document.createElement('span');
     meta.className = 'project__meta';
-    const pct = project.total_translatable
-      ? Math.round((project.translated_count / project.total_translatable) * 100)
-      : 0;
-    meta.textContent =
-      `${project.word_count.toLocaleString('pt-BR')} palavras · ${pct}% traduzido`;
+    const words = `${project.word_count.toLocaleString('pt-BR')} palavras`;
+    if (purpose === 'translate') {
+      const pct = project.total_translatable
+        ? Math.round((project.translated_count / project.total_translatable) * 100)
+        : 0;
+      meta.textContent = `${words} · ${pct}% traduzido`;
+    } else {
+      const chapters = project.import_summary?.chapters;
+      const pages = project.import_summary?.pages;
+      meta.textContent = [
+        pages ? `${pages.toLocaleString('pt-BR')} páginas` : null,
+        chapters ? `${chapters} ${chapters === 1 ? 'capítulo' : 'capítulos'}` : null,
+        words,
+      ].filter(Boolean).join(' · ');
+    }
+    row.append(purposeTag(purpose));
 
     const remove = document.createElement('button');
     remove.className = 'btn btn--danger';
@@ -140,23 +153,107 @@ const IMPORT_STAGES = {
   save: 'Gravando',
 };
 
-async function importFile(file) {
+// Duas caixas, dois objetivos. As duas criam o mesmo tipo de livro, com as duas
+// etapas; o objetivo decide por qual ele começa e o que o painel pergunta.
+const PURPOSES = {
+  convert: {
+    heading: 'Converter PDF em EPUB',
+    note: 'O livro abre na etapa de conversão, para revisar e exportar o EPUB. Dá para traduzir depois.',
+    tag: 'Conversão',
+    done: 'Revisar a conversão',
+  },
+  translate: {
+    heading: 'Importar para traduzir',
+    note: 'O livro abre na etapa de tradução. A etapa de conversão continua disponível para corrigir o texto.',
+    tag: 'Tradução',
+    done: 'Ir para a tradução',
+  },
+};
+
+// Livros importados antes das duas caixas não têm objetivo: vale o que já foi feito.
+function projectPurpose(project) {
+  return project.purpose || (project.translated_count ? 'translate' : 'convert');
+}
+
+async function importFile(file, purpose) {
   if (!file) return;
-  $('fileInput').value = '';  // escolher o mesmo arquivo de novo dispara onchange
+  for (const input of [$('fileConvert'), $('fileTranslate')]) input.value = '';  // o mesmo arquivo de novo dispara onchange
   const kind = file.name.toLowerCase().match(/\.(pdf|epub)$/)?.[1];
+  if (purpose === 'convert' && kind !== 'pdf') {
+    toast(
+      kind === 'epub'
+        ? 'A conversão recebe só PDF. Para traduzir um EPUB, use a caixa Traduzir.'
+        : 'Envie um arquivo .pdf',
+      'error'
+    );
+    return;
+  }
   if (!kind) { toast('Envie um arquivo .pdf ou .epub', 'error'); return; }
 
   state.pendingFile = file;
-  $('importHeading').textContent = kind === 'pdf' ? 'Importar PDF' : 'Importar EPUB';
-  $('importFileName').textContent =
-    `${file.name} · ${(file.size / 1024 / 1024).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MB`;
+  state.pendingPurpose = purpose;
+  $('importHeading').textContent = PURPOSES[purpose].heading;
+  $('importPurpose').textContent = PURPOSES[purpose].note;
+  $('importPurpose').dataset.purpose = purpose;
+  const size = file.size < 1024 * 1024
+    ? `${Math.max(1, Math.round(file.size / 1024))} KB`
+    : `${(file.size / 1024 / 1024).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MB`;
+  $('importFileName').textContent = `${file.name} · ${size}`;
   $('importTitle').value = '';
   $('importTitle').placeholder = kind === 'pdf' ? 'detectar pela folha de rosto' : 'o que está no EPUB';
   $('importTitleHint').textContent = 'Deixe em branco para usar o título do arquivo. Dá para mudar depois.';
   for (const element of document.querySelectorAll('.pdf-only')) element.hidden = kind !== 'pdf';
+  for (const element of document.querySelectorAll('.translate-only')) element.hidden = purpose !== 'translate';
+  $('startImport').textContent = purpose === 'translate' ? 'Importar para traduzir' : 'Converter';
   $('importSheet').hidden = false;
   $('startImport').focus();
-  if (kind === 'pdf') await loadImportOptions();
+  await loadImportOptions();
+  if (purpose === 'translate') fillTranslationFields();
+}
+
+// Idiomas e provedor: o padrão vem das preferências gerais.
+function fillTranslationFields() {
+  const languages = state.importOptions?.languages || [];
+  const settings = state.settings || {};
+  const codeOf = (name, fallback) =>
+    languages.find((l) => l.name === (name || '').trim().toLowerCase())?.code || fallback;
+
+  for (const [id, chosen] of [
+    ['importSource', codeOf(settings.source_language, 'en')],
+    ['importTarget', codeOf(settings.target_language, 'pt-BR')],
+  ]) {
+    const select = $(id);
+    select.innerHTML = '';
+    for (const { code, name } of languages) {
+      select.append(new Option(name[0].toUpperCase() + name.slice(1), code, false, code === chosen));
+    }
+  }
+
+  const providers = settings.providers || [];
+  const select = $('importProvider');
+  select.innerHTML = '';
+  for (const provider of providers) {
+    const label = provider.model ? `${provider.label} · ${provider.model}` : provider.label;
+    select.append(new Option(label, provider.id, false, provider.id === settings.active_provider_id));
+  }
+  select.disabled = !providers.length;
+  if (!providers.length) select.append(new Option('Nenhum configurado', ''));
+  $('importProviderHint').textContent = providers.length
+    ? 'O livro traduz com este provedor. Se ele for apagado, vale o ativo nas configurações.'
+    : 'Adicione um provedor em Configurações antes de traduzir. O livro pode ser importado mesmo assim.';
+  syncOcrWithSource();
+}
+
+// O idioma do livro também é o que o OCR precisa reconhecer.
+const OCR_CODES = {
+  en: 'eng', 'pt-BR': 'por', 'pt-PT': 'por', es: 'spa', fr: 'fra', de: 'deu',
+  it: 'ita', nl: 'nld', ru: 'rus', ja: 'jpn', zh: 'chi_sim', la: 'lat',
+};
+
+function syncOcrWithSource() {
+  const code = OCR_CODES[$('importSource').value];
+  const box = $('importLangs').querySelector(`input[value="${code}"]`);
+  if (box) box.checked = true;
 }
 
 async function loadImportOptions() {
@@ -210,13 +307,20 @@ function syncOcrFields() {
 
 async function startImport() {
   const file = state.pendingFile;
+  const purpose = state.pendingPurpose;
   if (!file) return;
   state.pendingFile = null;
   $('importSheet').hidden = true;
 
   const form = new FormData();
   form.append('file', file);
+  form.append('purpose', purpose);
   form.append('title', $('importTitle').value.trim());
+  if (purpose === 'translate') {
+    form.append('source_language', $('importSource').value);
+    form.append('target_language', $('importTarget').value);
+    form.append('provider_id', $('importProvider').value);
+  }
   if (file.name.toLowerCase().endsWith('.pdf')) {
     form.append('split_on', $('importSplit').value);
     form.append('ocr_mode', $('importOcr').value);
@@ -225,7 +329,10 @@ async function startImport() {
   }
 
   // Enquanto o arquivo sobe, a importação ainda não tem id no servidor.
-  const local = { id: `envio-${Date.now()}`, filename: file.name, status: 'running', stage: 'upload', done: 0, total: 100 };
+  const local = {
+    id: `envio-${Date.now()}`, filename: file.name, purpose,
+    status: 'running', stage: 'upload', done: 0, total: 100,
+  };
   state.imports.set(local.id, local);
   renderImports();
 
@@ -267,6 +374,14 @@ function upload(path, form, onProgress, onStart) {
   });
 }
 
+function purposeTag(purpose) {
+  const tag = document.createElement('span');
+  tag.className = 'tag';
+  tag.dataset.purpose = purpose;
+  tag.textContent = PURPOSES[purpose]?.tag || purpose;
+  return tag;
+}
+
 function renderImports() {
   const list = $('importList');
   list.innerHTML = '';
@@ -276,7 +391,7 @@ function renderImports() {
 
     const name = document.createElement('span');
     name.className = 'import__name';
-    name.textContent = job.filename;
+    name.append(purposeTag(job.purpose), job.filename);
 
     const status = document.createElement('span');
     status.className = 'import__status';
@@ -389,6 +504,7 @@ async function resumeImports() {
 function showSummary(project) {
   const summary = project.import_summary || {};
   $('summaryFile').textContent = project.source_filename;
+  $('summaryDone').textContent = PURPOSES[projectPurpose(project)].done;
 
   const number = (value) => Number(value || 0).toLocaleString('pt-BR');
   const stats = [
@@ -491,7 +607,7 @@ function initialStage(project) {
     const saved = localStorage.getItem(stageKey(project.id));
     if (saved === 'convert' || saved === 'translate') return saved;
   } catch { /* armazenamento bloqueado: decide pelo livro */ }
-  return project.translated_count ? 'translate' : 'convert';
+  return projectPurpose(project);
 }
 
 function setStage(stage) {
@@ -640,6 +756,10 @@ function renderEditor() {
         (stale ? ` ${stale} com o original alterado depois da tradução.` : '') +
         ' O texto original fica acima de cada campo.'
       : 'Capítulo sem texto traduzível.';
+    const own = state.project.translation || {};
+    if (own.source_language && own.target_language) {
+      note.textContent += ` Do ${own.source_language} para o ${own.target_language}.`;
+    }
   }
   inner.append(note);
 
@@ -1403,17 +1523,20 @@ function escapeHtml(text) {
 /* --------------------------------------------------------------- ligações */
 
 function wire() {
-  $('pickBtn').onclick = () => $('fileInput').click();
-  $('fileInput').onchange = (event) => importFile(event.target.files[0]);
-
-  const drop = $('drop');
-  drop.ondragover = (event) => { event.preventDefault(); drop.dataset.over = 'true'; };
-  drop.ondragleave = () => { drop.dataset.over = 'false'; };
-  drop.ondrop = (event) => {
-    event.preventDefault();
-    drop.dataset.over = 'false';
-    importFile(event.dataTransfer.files[0]);
-  };
+  const inputs = { convert: $('fileConvert'), translate: $('fileTranslate') };
+  for (const drop of document.querySelectorAll('.drop[data-purpose]')) {
+    const purpose = drop.dataset.purpose;
+    drop.querySelector('[data-pick]').onclick = () => inputs[purpose].click();
+    inputs[purpose].onchange = (event) => importFile(event.target.files[0], purpose);
+    drop.ondragover = (event) => { event.preventDefault(); drop.dataset.over = 'true'; };
+    drop.ondragleave = () => { drop.dataset.over = 'false'; };
+    drop.ondrop = (event) => {
+      event.preventDefault();
+      drop.dataset.over = 'false';
+      importFile(event.dataTransfer.files[0], purpose);
+    };
+  }
+  $('importSource').onchange = syncOcrWithSource;
 
   $('startImport').onclick = startImport;
   $('importOcr').onchange = syncOcrFields;
@@ -1424,7 +1547,7 @@ function wire() {
   $('closeSummary').onclick = closeSummary;
   $('summaryDone').onclick = () => {
     closeSummary();
-    setStage('convert');
+    setStage(projectPurpose(state.project));
   };
   $('summarySheet').onclick = (event) => { if (event.target === $('summarySheet')) closeSummary(); };
 

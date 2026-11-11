@@ -21,6 +21,28 @@ from .structure import split_into_chapters
 SPLIT_LEVELS = ("heading1", "heading2", "none")
 OCR_MODES = ("auto", "force", "off")
 
+# Para que o livro foi importado: só converter o PDF em EPUB, ou traduzir.
+# As duas etapas continuam abertas a qualquer livro; o objetivo decide por
+# onde ele começa e como aparece na lista.
+PURPOSES = ("convert", "translate")
+
+# Idiomas oferecidos na importação para tradução: o código vai para o EPUB
+# (lang, dc:language), o nome para o pedido ao modelo.
+LANGUAGES: dict[str, str] = {
+    "en": "inglês",
+    "pt-BR": "português brasileiro",
+    "pt-PT": "português europeu",
+    "es": "espanhol",
+    "fr": "francês",
+    "de": "alemão",
+    "it": "italiano",
+    "nl": "holandês",
+    "ru": "russo",
+    "ja": "japonês",
+    "zh": "chinês",
+    "la": "latim",
+}
+
 # Acima disto, um livro inteiro num capítulo só é suspeito.
 SINGLE_CHAPTER_WORDS = 5_000
 
@@ -33,12 +55,37 @@ class ImportOptions:
     # Ver pdf_extract.extract_blocks.
     ocr_mode: str = "auto"
     ocr_languages: str | None = None
+    purpose: str = "convert"
+    # Só na importação para tradução: códigos de LANGUAGES e o provedor.
+    source_language: str = ""
+    target_language: str = ""
+    provider_id: str = ""
 
-    def validate(self) -> None:
+    def validate(self, suffix: str = ".pdf") -> None:
         if self.split_on not in SPLIT_LEVELS:
             raise ValueError(f"Nível de capítulo desconhecido: {self.split_on}")
         if self.ocr_mode not in OCR_MODES:
             raise ValueError(f"Modo de OCR desconhecido: {self.ocr_mode}")
+        if self.purpose not in PURPOSES:
+            raise ValueError(f"Objetivo desconhecido: {self.purpose}")
+        if self.purpose == "convert" and suffix != ".pdf":
+            raise ValueError(
+                "A conversão recebe só PDF. Para traduzir um EPUB, use a importação para tradução."
+            )
+        for code in (self.source_language, self.target_language):
+            if code and code not in LANGUAGES:
+                raise ValueError(f"Idioma desconhecido: {code}")
+
+    def translation(self) -> dict[str, str]:
+        """As preferências de tradução do livro, como o projeto as guarda."""
+        if self.purpose != "translate":
+            return {}
+        chosen = {
+            "source_language": LANGUAGES.get(self.source_language, ""),
+            "target_language": LANGUAGES.get(self.target_language, ""),
+            "provider_id": self.provider_id,
+        }
+        return {key: value for key, value in chosen.items() if value}
 
 
 def import_file(
@@ -53,7 +100,7 @@ def import_file(
     Levanta ValueError quando o arquivo não tem como ser lido; o texto da
     exceção é para o usuário.
     """
-    options.validate()
+    options.validate(suffix)
     started = time.monotonic()
     report: ExtractionReport | None = None
 
@@ -84,6 +131,11 @@ def import_file(
                 document.title = options.title
             if on_progress:
                 on_progress("read", 1, 1)
+
+    if options.source_language:
+        document.source_language = options.source_language
+    if options.target_language:
+        document.language = options.target_language
 
     summary = build_summary(document, report, options, time.monotonic() - started)
     return document, summary

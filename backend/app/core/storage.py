@@ -50,6 +50,12 @@ class ProjectMeta:
     # O que a importação encontrou (ver core/importer.build_summary). Vazio em
     # projetos importados antes dele existir.
     import_summary: dict[str, Any] = field(default_factory=dict)
+    # "convert" ou "translate" (ver core/importer.PURPOSES); vazio nos projetos
+    # importados antes da escolha existir.
+    purpose: str = ""
+    # Idiomas e provedor escolhidos na importação para tradução. Valem antes
+    # das preferências gerais.
+    translation: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
@@ -90,6 +96,8 @@ class ProjectStore:
         source_filename: str = "",
         source_bytes: bytes | None = None,
         import_summary: dict[str, Any] | None = None,
+        purpose: str = "",
+        translation: dict[str, str] | None = None,
     ) -> ProjectMeta:
         project_id = new_id()
         directory = self.project_dir(project_id)
@@ -117,6 +125,8 @@ class ProjectStore:
             total_translatable=len(document.translatable_blocks()),
             translated_count=_count_translated(document),
             import_summary=import_summary or {},
+            purpose=purpose,
+            translation=translation or {},
         )
 
         self.save_document(project_id, document)
