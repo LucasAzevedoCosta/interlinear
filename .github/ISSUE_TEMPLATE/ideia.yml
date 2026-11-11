@@ -1,0 +1,21 @@
+name: Ideia ou melhoria
+description: Sugira uma funcionalidade ou mudança
+labels: ["melhoria"]
+body:
+  - type: textarea
+    id: problema
+    attributes:
+      label: Qual problema isso resolve
+      description: Conte a situação em que você sentiu falta. O "porquê" ajuda mais que a solução pronta.
+    validations:
+      required: true
+  - type: textarea
+    id: proposta
+    attributes:
+      label: Como você imagina
+  - type: checkboxes
+    id: contribuir
+    attributes:
+      label: Contribuição
+      options:
+        - label: Posso tentar implementar (leia o CONTRIBUTING.md antes)

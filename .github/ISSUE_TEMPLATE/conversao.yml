@@ -1,0 +1,42 @@
+name: Conversão de PDF
+description: O EPUB saiu com capítulos, parágrafos, notas ou ordem errados
+labels: ["conversão"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Antes de abrir, veja as [limitações conhecidas](https://github.com/LucasAzevedoCosta/interlinear#limitações-conhecidas):
+        pode ser algo já mapeado.
+
+        **Sobre o PDF de exemplo:** anexe só o que você tem direito de compartilhar.
+        Uma ou duas páginas bastam (dá para recortar com qualquer leitor de PDF,
+        imprimindo em PDF só as páginas do problema).
+  - type: textarea
+    id: problema
+    attributes:
+      label: O que saiu errado
+      description: "Ex.: notas de rodapé viraram parágrafos, colunas embaralhadas, capítulo não detectado."
+    validations:
+      required: true
+  - type: textarea
+    id: exemplo
+    attributes:
+      label: PDF de exemplo e print
+      description: Arraste o PDF (ou as páginas do problema) e, se puder, um print do editor mostrando o resultado.
+  - type: dropdown
+    id: tipo-pdf
+    attributes:
+      label: Tipo de PDF
+      options:
+        - Texto nativo (dá para selecionar o texto)
+        - Escaneado (imagem)
+        - Misto
+        - Não sei
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log com INTERLINEAR_LOG_LEVEL=DEBUG
+      description: Mostra o que o extrator decidiu em cada página.
+      render: text

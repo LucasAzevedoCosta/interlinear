@@ -1,0 +1,65 @@
+name: Bug
+description: Algo não funciona como deveria
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Obrigado por relatar. Falhas de segurança vão pelo [SECURITY.md](https://github.com/LucasAzevedoCosta/interlinear/blob/main/SECURITY.md), não por aqui.
+        Para problemas de **conversão de PDF**, use o modelo "Conversão de PDF".
+  - type: textarea
+    id: o-que-aconteceu
+    attributes:
+      label: O que aconteceu
+      description: E o que você esperava que acontecesse.
+    validations:
+      required: true
+  - type: textarea
+    id: passos
+    attributes:
+      label: Como reproduzir
+      placeholder: |
+        1. Importei um EPUB...
+        2. Cliquei em Traduzir...
+        3. Apareceu o erro...
+    validations:
+      required: true
+  - type: dropdown
+    id: como-roda
+    attributes:
+      label: Como você roda o Interlinear
+      options:
+        - Docker
+        - run.sh / run.ps1
+        - uvicorn direto
+    validations:
+      required: true
+  - type: dropdown
+    id: sistema
+    attributes:
+      label: Sistema operacional
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: versao
+    attributes:
+      label: Versão
+      description: Saída de `git rev-parse --short HEAD`, ou a data em que baixou.
+  - type: input
+    id: provedor
+    attributes:
+      label: Provedor de IA (se o problema for na tradução)
+      placeholder: OpenAI gpt-4.1-mini, Ollama qwen3:14b...
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >-
+        O que apareceu no terminal (ou em `docker compose logs`). Com
+        `INTERLINEAR_LOG_LEVEL=DEBUG` sai mais detalhe. Confira se não há
+        nenhuma chave de API antes de colar.
+      render: text
