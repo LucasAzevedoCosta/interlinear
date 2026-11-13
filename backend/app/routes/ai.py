@@ -146,8 +146,12 @@ async def test_provider(provider_id: str) -> dict[str, Any]:
     settings = get_settings_store().load()
     provider, _ = _resolve_provider(settings, provider_id)
 
+    account: dict[str, Any] = {}
     async with httpx.AsyncClient(follow_redirects=True) as client:
         try:
+            # Provedores pela assinatura dizem em que plano estão logados.
+            if hasattr(provider, "account"):
+                account = await provider.account()
             completion = await provider.complete(
                 [
                     Message(role="system", content="Responda em uma palavra."),
@@ -165,6 +169,7 @@ async def test_provider(provider_id: str) -> dict[str, Any]:
         "reply": completion.text.strip()[:120],
         "input_tokens": completion.usage.input_tokens,
         "output_tokens": completion.usage.output_tokens,
+        "plan": account.get("plan", ""),
     }
 
 

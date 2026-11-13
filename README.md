@@ -39,7 +39,9 @@ exportação, então o que aparece na tela é exatamente o que vai para o arquiv
 - **Edita** parágrafo a parágrafo, com salvamento automático
 - **Mostra a prévia** de cada capítulo como ele vai aparecer no leitor
 - **Traduz** com OpenAI, Anthropic, Google Gemini, qualquer endpoint compatível
-  (OpenRouter, DeepSeek, Groq), ou modelos locais via LM Studio e Ollama
+  (OpenRouter, DeepSeek, Groq), modelos locais via LM Studio e Ollama, ou,
+  em modo experimental, com a sua assinatura do Claude, pelo Claude Code
+  ([docs/provedores.md](docs/provedores.md))
 - **Exporta** EPUB 3 válido, com a tradução ou com o original
 
 ## Documentação
@@ -49,6 +51,7 @@ exportação, então o que aparece na tela é exatamente o que vai para o arquiv
 | Formato EPUB, aparelhos compatíveis, ferramentas, IA local no Mac, decisões técnicas | [docs/guia.md](docs/guia.md) |
 | Por que converter PDF é difícil, limitações, papel do preview, custos de IA | [docs/conversao.md](docs/conversao.md) |
 | Licenças das dependências e a armadilha do AGPL | [docs/licencas.md](docs/licencas.md) |
+| Provedores de IA, inclusive o Claude pela assinatura (experimental) | [docs/provedores.md](docs/provedores.md) |
 
 Abrindo o projeto pela primeira vez, comece pelo [guia](docs/guia.md).
 
@@ -228,6 +231,7 @@ e termos iguais do começo ao fim do livro.
 | `INTERLINEAR_LOG_LEVEL`     | `DEBUG` para ver o que o extrator decidiu         |
 | `INTERLINEAR_OCR_LANGS`     | Idiomas do OCR (padrão `por+eng`; só os instalados valem) |
 | `INTERLINEAR_TESSERACT`     | Caminho do Tesseract, se não estiver no `PATH`    |
+| `INTERLINEAR_CLAUDE`        | Caminho do Claude Code, se não estiver no `PATH` (Claude pela assinatura) |
 
 Usar as variáveis de ambiente evita gravar chave nenhuma em disco.
 

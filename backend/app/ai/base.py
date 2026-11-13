@@ -23,10 +23,32 @@ log = logging.getLogger(__name__)
 class ProviderError(RuntimeError):
     """Falha ao falar com o provedor."""
 
-    def __init__(self, message: str, *, status: int | None = None, retryable: bool = False):
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        retryable: bool = False,
+        fatal: bool = False,
+    ):
         super().__init__(message)
         self.status = status
         self.retryable = retryable
+        # Vale para o livro inteiro mesmo sem status HTTP (programa ausente,
+        # conta deslogada): a tarefa para em vez de tentar cada lote.
+        self.fatal = fatal
+
+
+class PlanLimitError(ProviderError):
+    """O limite de uso da assinatura acabou. Não é falha: é esperar a janela renovar.
+
+    resets_at é o instante (epoch) em que o limite renova, quando o provedor
+    informa; None quando não informa.
+    """
+
+    def __init__(self, message: str, *, resets_at: float | None = None):
+        super().__init__(message, status=429)
+        self.resets_at = resets_at
 
 
 @dataclass

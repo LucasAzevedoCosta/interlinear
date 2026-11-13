@@ -13,8 +13,14 @@ Nenhuma chave é enviada para lugar nenhum além do endpoint do próprio provedo
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import re
+import shutil
+import tempfile
+import time
+from datetime import datetime, timedelta
 from typing import Any
 
 import httpx
@@ -22,6 +28,7 @@ import httpx
 from .base import (
     Completion,
     Message,
+    PlanLimitError,
     Provider,
     ProviderConfig,
     ProviderError,
@@ -313,6 +320,201 @@ class GoogleProvider(Provider):
 
 
 # --------------------------------------------------------------------------
+# Claude pela assinatura (Claude Code)
+# --------------------------------------------------------------------------
+
+
+# Modelos aceitos pelo Claude Code como apelido do mais recente de cada linha.
+CLAUDE_CLI_MODELS = ["haiku", "sonnet", "opus"]
+
+_RESET_EPOCH = re.compile(r"\|\s*(\d{10})\b")
+_RESET_CLOCK = re.compile(r"resets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)", re.I)
+_LIMIT_WORDS = ("usage limit", "limit reached", "limit will reset", "out of extra usage")
+_LOGIN_WORDS = ("/login", "not logged in", "invalid api key", "please log in")
+
+
+def claude_path() -> str | None:
+    return shutil.which(os.environ.get("INTERLINEAR_CLAUDE", "claude"))
+
+
+class ClaudeCliProvider(Provider):
+    """Claude pela assinatura (Pro/Max), sem chave de API. Experimental.
+
+    Não fala com a API: roda o Claude Code oficial, instalado e logado pelo
+    próprio usuário, em modo não interativo (`claude -p`), e lê a resposta.
+    O Interlinear nunca vê nem guarda o token do login; a Anthropic proíbe
+    que terceiros façam isso. Veja docs/provedores.md antes de usar: o uso sai
+    dos limites do plano, e as regras da Anthropic para uso programático da
+    assinatura mudaram várias vezes.
+
+    Cada chamada roda isolada: sem ferramentas, sem as configurações, hooks,
+    servidores MCP e skills do usuário, numa pasta vazia, e com o nosso prompt
+    no lugar do prompt do Claude Code. ANTHROPIC_API_KEY sai do ambiente para
+    a CLI não cair na cobrança por token.
+    """
+
+    def __init__(self, config: ProviderConfig) -> None:
+        super().__init__(config)
+        self._checked_account = False
+
+    @property
+    def model(self) -> str:
+        return self.config.model or "sonnet"
+
+    def _executable(self) -> str:
+        path = claude_path()
+        if path is None:
+            raise ProviderError(
+                "Claude Code não encontrado. Instale (claude.com/claude-code) e entre "
+                "com a sua conta rodando `claude` no terminal. Dentro do Docker ele não "
+                "está disponível: rode o Interlinear direto na máquina.",
+                fatal=True,
+            )
+        return path
+
+    @staticmethod
+    def _env() -> dict[str, str]:
+        return {
+            key: value
+            for key, value in os.environ.items()
+            if key not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+        }
+
+    async def _run(self, args: list[str], stdin: str = "", timeout: float = 30.0) -> tuple[int, str, str]:
+        with tempfile.TemporaryDirectory(prefix="interlinear-claude-") as folder:
+            process = await asyncio.create_subprocess_exec(
+                self._executable(),
+                *args,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=folder,  # sem CLAUDE.md de projeto nenhum
+                env=self._env(),
+            )
+            try:
+                out, err = await asyncio.wait_for(
+                    process.communicate(stdin.encode()), timeout=timeout
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                raise ProviderError(
+                    f"O Claude Code não respondeu em {timeout:.0f}s", retryable=True
+                ) from None
+        return process.returncode or 0, out.decode(errors="replace"), err.decode(errors="replace")
+
+    async def account(self) -> dict[str, Any]:
+        """A conta em que o Claude Code está logado: plano e forma de login."""
+        code, out, err = await self._run(["auth", "status"])
+        try:
+            data = json.loads(out)
+        except json.JSONDecodeError:
+            data = {}
+        if code != 0 and not data:
+            raise ProviderError(f"Claude Code: {(err or out).strip()[:300]}", fatal=True)
+        if not data.get("loggedIn"):
+            raise ProviderError(
+                "O Claude Code não está logado. Rode `claude` no terminal e entre com a sua conta.",
+                fatal=True,
+            )
+        if data.get("authMethod") != "claude.ai":
+            raise ProviderError(
+                "O Claude Code está entrando com chave de API, não com a assinatura. "
+                "Para usar a chave, cadastre o provedor Anthropic; para usar a "
+                "assinatura, entre com `claude` → /login → conta Claude.",
+                fatal=True,
+            )
+        return {"plan": data.get("subscriptionType") or "", "method": data.get("authMethod")}
+
+    async def complete(
+        self, messages: list[Message], *, client: httpx.AsyncClient
+    ) -> Completion:
+        # Uma vez por tarefa: a conta não muda no meio de um livro.
+        if not self._checked_account:
+            await self.account()
+            self._checked_account = True
+
+        system = "\n\n".join(m.content for m in messages if m.role == "system")
+        prompt = "\n\n".join(m.content for m in messages if m.role != "system")
+        code, out, err = await self._run(
+            [
+                "-p",
+                "--output-format", "json",
+                "--model", self.model,
+                "--system-prompt", system,
+                "--tools", "",
+                "--setting-sources", "",
+                "--strict-mcp-config",
+                "--disable-slash-commands",
+                "--no-session-persistence",
+            ],
+            stdin=prompt,
+            timeout=self.config.timeout,
+        )
+
+        try:
+            data = json.loads(out)
+        except json.JSONDecodeError:
+            data = None
+        if not isinstance(data, dict):
+            raise _cli_error((err or out).strip() or f"Claude Code saiu com código {code}")
+        if data.get("is_error") or data.get("subtype") != "success":
+            raise _cli_error(str(data.get("result") or err or data.get("subtype")),
+                             status=data.get("api_error_status"))
+
+        usage = data.get("usage") or {}
+        return Completion(
+            text=str(data.get("result") or ""),
+            usage=Usage(
+                input_tokens=int(usage.get("input_tokens") or 0)
+                + int(usage.get("cache_read_input_tokens") or 0)
+                + int(usage.get("cache_creation_input_tokens") or 0),
+                output_tokens=int(usage.get("output_tokens") or 0),
+            ),
+        )
+
+    async def list_models(self, *, client: httpx.AsyncClient) -> list[str]:
+        return list(CLAUDE_CLI_MODELS)
+
+
+def _cli_error(message: str, *, status: Any = None) -> ProviderError:
+    """Traduz a mensagem de erro do Claude Code no erro certo para o tradutor."""
+    lowered = message.lower()
+    if any(word in lowered for word in _LIMIT_WORDS):
+        return PlanLimitError(f"Limite do plano: {message[:300]}", resets_at=_reset_time(message))
+    if any(word in lowered for word in _LOGIN_WORDS):
+        return ProviderError(
+            "O Claude Code não está logado. Rode `claude` no terminal e entre com a sua conta.",
+            fatal=True,
+        )
+    code = int(status) if isinstance(status, int) or str(status).isdigit() else None
+    return ProviderError(
+        f"Claude Code: {message[:300]}",
+        status=code,
+        retryable=code is None or classify_status(code),
+    )
+
+
+def _reset_time(message: str, now: float | None = None) -> float | None:
+    """Quando o limite renova, pelo texto do Claude Code. None se não disser.
+
+    Aceita o formato antigo ("…|1731430800") e o horário ("resets 3pm",
+    "resets at 3:30pm"), tomado como hora local da próxima ocorrência.
+    """
+    if match := _RESET_EPOCH.search(message):
+        return float(match.group(1))
+    if match := _RESET_CLOCK.search(message):
+        hour = int(match.group(1)) % 12 + (12 if match.group(3).lower() == "pm" else 0)
+        minute = int(match.group(2) or 0)
+        current = datetime.fromtimestamp(now if now is not None else time.time())
+        target = current.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if target <= current:
+            target += timedelta(days=1)
+        return target.timestamp()
+    return None
+
+
+# --------------------------------------------------------------------------
 # Registro
 # --------------------------------------------------------------------------
 
@@ -323,6 +525,7 @@ _PROVIDERS: dict[str, type[Provider]] = {
     "google": GoogleProvider,
     "ollama": OllamaProvider,
     "lmstudio": LMStudioProvider,
+    "claude_cli": ClaudeCliProvider,
 }
 
 # Metadados para a interface: o que mostrar e o que pedir ao usuário.
@@ -368,6 +571,21 @@ PROVIDER_CATALOG = [
         "needs_key": False,
         "default_base_url": OLLAMA_URL,
         "hint": "Precisa do Ollama rodando na máquina.",
+    },
+    {
+        "kind": "claude_cli",
+        "label": "Claude pela assinatura (experimental)",
+        "needs_key": False,
+        "needs_base_url": False,
+        "default_base_url": "",
+        "default_model": "sonnet",
+        "experimental": True,
+        "hint": (
+            "Usa o Claude Code instalado e logado nesta máquina, e os limites do "
+            "seu plano Pro ou Max, sem chave de API. Não funciona dentro do Docker. "
+            "Experimental: as regras da Anthropic para esse uso mudaram várias "
+            "vezes, e o uso pesado pode restringir a conta. Veja docs/provedores.md."
+        ),
     },
 ]
 

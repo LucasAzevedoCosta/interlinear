@@ -20,13 +20,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 
 import httpx
 
 from ..core.blocks import Block
-from .base import Message, Provider, ProviderError, Usage
+from .base import Message, PlanLimitError, Provider, ProviderError, Usage
 
 log = logging.getLogger(__name__)
 
@@ -85,9 +86,14 @@ FATAL_STATUSES = frozenset({401, 403, 404})
 # parâmetro inválido...) também indicam problema de configuração, não de texto.
 MAX_CONSECUTIVE_FAILURES = 5
 
+# Limite do plano sem hora de renovação informada: tenta de novo depois disto.
+PLAN_LIMIT_WAIT = 10 * 60.0
+# Folga depois da hora de renovação, para não bater no limite ainda fechado.
+PLAN_LIMIT_MARGIN = 30.0
+
 
 def is_fatal(exc: ProviderError) -> bool:
-    return not exc.retryable and exc.status in FATAL_STATUSES
+    return exc.fatal or (not exc.retryable and exc.status in FATAL_STATUSES)
 
 
 # --------------------------------------------------------------------------
@@ -286,7 +292,8 @@ class Translator:
                 usage = usage + completion.usage
                 results.append(_clean_single(completion.text))
             except ProviderError as exc:
-                if is_fatal(exc):
+                # O limite do plano sobe para o lote inteiro esperar e ser refeito.
+                if is_fatal(exc) or isinstance(exc, PlanLimitError):
                     raise
                 log.error("Falha ao traduzir bloco %s: %s", block.id, exc)
                 results.append("")
@@ -309,6 +316,9 @@ class Translator:
         sequência de lotes falhando interrompe tudo: os lotes na fila não são
         enviados e o ProviderError sobe para quem chamou. O que já foi traduzido
         fica em block.translated.
+
+        Quando o limite do plano da assinatura acaba (PlanLimitError), todos os
+        lotes esperam a janela renovar e continuam; current_note diz até quando.
         """
         pending = [b for b in blocks if b.text.strip()]
         batches = build_batches(pending, max_chars=self.settings.batch_chars)
@@ -326,6 +336,26 @@ class Translator:
         def halted() -> bool:
             return bool(abort) or bool(should_stop and should_stop())
 
+        # Limite do plano da assinatura: todos os lotes esperam até a mesma hora.
+        paused_until = 0.0
+
+        async def pause_for_plan(exc: PlanLimitError) -> None:
+            nonlocal paused_until
+            async with lock:
+                resume = (
+                    exc.resets_at + PLAN_LIMIT_MARGIN
+                    if exc.resets_at
+                    else time.time() + PLAN_LIMIT_WAIT
+                )
+                paused_until = max(paused_until, resume)
+                at = time.strftime("%H:%M", time.localtime(paused_until))
+                progress.current_note = f"Limite do plano atingido. Continua às {at}."
+                await _notify(on_progress, progress)
+
+        async def wait_while_paused() -> None:
+            while time.time() < paused_until and not halted():
+                await asyncio.sleep(min(5.0, max(0.0, paused_until - time.time())))
+
         async def run_batch(batch: list[Block]) -> None:
             nonlocal consecutive_failures
             if halted():
@@ -337,25 +367,32 @@ class Translator:
             after = pending[end + 1 : end + 1 + window]
 
             async with semaphore:
-                if halted():
-                    return
-                try:
-                    segments, usage = await self.translate_batch(
-                        batch, before=before, after=after
-                    )
-                except ProviderError as exc:
-                    log.error("Lote falhou definitivamente: %s", exc)
-                    async with lock:
-                        progress.failed += len(batch)
-                        progress.current_note = f"Erro: {exc}"
-                        consecutive_failures += 1
-                        if not abort and (
-                            is_fatal(exc)
-                            or consecutive_failures >= MAX_CONSECUTIVE_FAILURES
-                        ):
-                            abort.append(exc)
-                        await _notify(on_progress, progress)
-                    return
+                while True:
+                    await wait_while_paused()
+                    if halted():
+                        return
+                    try:
+                        segments, usage = await self.translate_batch(
+                            batch, before=before, after=after
+                        )
+                        break
+                    except PlanLimitError as exc:
+                        # Não é falha do lote: espera a janela renovar e refaz.
+                        log.info("Limite do plano: %s", exc)
+                        await pause_for_plan(exc)
+                    except ProviderError as exc:
+                        log.error("Lote falhou definitivamente: %s", exc)
+                        async with lock:
+                            progress.failed += len(batch)
+                            progress.current_note = f"Erro: {exc}"
+                            consecutive_failures += 1
+                            if not abort and (
+                                is_fatal(exc)
+                                or consecutive_failures >= MAX_CONSECUTIVE_FAILURES
+                            ):
+                                abort.append(exc)
+                            await _notify(on_progress, progress)
+                        return
 
             async with lock:
                 for block, translation in zip(batch, segments):

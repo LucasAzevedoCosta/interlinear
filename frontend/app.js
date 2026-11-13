@@ -1252,6 +1252,8 @@ function showProgress(job) {
   let label = `${job.done}/${job.total}`;
   if (job.failed) label += ` · ${job.failed} falhas`;
   if (job.eta_seconds != null) label += ` · faltam ${formatDuration(job.eta_seconds)}`;
+  // A pausa pelo limite do plano aparece no lugar da estimativa.
+  if (job.note?.startsWith('Limite do plano')) label = `${job.done}/${job.total} · ${job.note}`;
   $('progressLabel').textContent = label;
 }
 
@@ -1516,7 +1518,11 @@ function applyCatalogDefaults() {
   if (!entry) return;
   $('pBase').value = entry.default_base_url;
   $('pHint').textContent = entry.hint;
+  $('pHint').dataset.experimental = Boolean(entry.experimental);
   $('keyField').style.display = entry.needs_key ? '' : 'none';
+  // Claude pela assinatura: não há endereço nem chave, só o modelo.
+  $('baseField').hidden = entry.needs_base_url === false;
+  if (entry.default_model && !$('pModel').value) $('pModel').value = entry.default_model;
   if (!$('pLabel').value || state.editingProviderId === null) {
     $('pLabel').value = entry.label;
   }
@@ -1568,7 +1574,10 @@ async function testProvider() {
   $('testProvider').disabled = true;
   try {
     const data = await api(`/api/providers/${state.editingProviderId}/test`, { method: 'POST' });
-    if (data.ok) toast(`Conectado. O modelo respondeu: ${data.reply}`);
+    if (data.ok) {
+      const plan = data.plan ? ` pelo plano ${data.plan[0].toUpperCase()}${data.plan.slice(1)}` : '';
+      toast(`Conectado${plan}. O modelo respondeu: ${data.reply}`);
+    }
     else toast(data.error, 'error');
   } catch (error) {
     toast(error.message, 'error');
