@@ -337,6 +337,21 @@ def claude_path() -> str | None:
     return shutil.which(os.environ.get("INTERLINEAR_CLAUDE", "claude"))
 
 
+def in_docker() -> bool:
+    """A imagem do Interlinear marca o ambiente; o login lá é pelo Docker Desktop."""
+    return os.environ.get("INTERLINEAR_DOCKER") == "1"
+
+
+def claude_login_hint() -> str:
+    if in_docker():
+        return (
+            "No Docker Desktop, abra o container interlinear, aba Exec, e rode "
+            "`claude auth login` (ou, no terminal, `docker exec -it interlinear "
+            "claude auth login`)."
+        )
+    return "Rode `claude auth login` no terminal e entre com a sua conta Claude."
+
+
 class ClaudeCliProvider(Provider):
     """Claude pela assinatura (Pro/Max), sem chave de API. Experimental.
 
@@ -365,9 +380,11 @@ class ClaudeCliProvider(Provider):
         path = claude_path()
         if path is None:
             raise ProviderError(
-                "Claude Code não encontrado. Instale (claude.com/claude-code) e entre "
-                "com a sua conta rodando `claude` no terminal. Dentro do Docker ele não "
-                "está disponível: rode o Interlinear direto na máquina.",
+                "Esta imagem do Interlinear foi construída sem o Claude Code. Reconstrua "
+                "com INTERLINEAR_WITH_CLAUDE=1 (veja docs/provedores.md)."
+                if in_docker()
+                else "Claude Code não encontrado. Instale (claude.com/claude-code) e "
+                "entre com a sua conta.",
                 fatal=True,
             )
         return path
@@ -403,25 +420,29 @@ class ClaudeCliProvider(Provider):
                 ) from None
         return process.returncode or 0, out.decode(errors="replace"), err.decode(errors="replace")
 
-    async def account(self) -> dict[str, Any]:
-        """A conta em que o Claude Code está logado: plano e forma de login."""
+    async def auth_status(self) -> dict[str, Any]:
+        """O `claude auth status`: logado ou não, forma de login, plano. Sem token."""
         code, out, err = await self._run(["auth", "status"])
         try:
             data = json.loads(out)
         except json.JSONDecodeError:
             data = {}
-        if code != 0 and not data:
+        if not isinstance(data, dict) or (code != 0 and not data):
             raise ProviderError(f"Claude Code: {(err or out).strip()[:300]}", fatal=True)
+        return data
+
+    async def account(self) -> dict[str, Any]:
+        """A conta em que o Claude Code está logado: plano e forma de login."""
+        data = await self.auth_status()
         if not data.get("loggedIn"):
             raise ProviderError(
-                "O Claude Code não está logado. Rode `claude` no terminal e entre com a sua conta.",
-                fatal=True,
+                f"O Claude Code não está logado. {claude_login_hint()}", fatal=True
             )
         if data.get("authMethod") != "claude.ai":
             raise ProviderError(
                 "O Claude Code está entrando com chave de API, não com a assinatura. "
                 "Para usar a chave, cadastre o provedor Anthropic; para usar a "
-                "assinatura, entre com `claude` → /login → conta Claude.",
+                f"assinatura, saia (`claude auth logout`) e entre de novo. {claude_login_hint()}",
                 fatal=True,
             )
         return {"plan": data.get("subscriptionType") or "", "method": data.get("authMethod")}
@@ -514,6 +535,38 @@ def _reset_time(message: str, now: float | None = None) -> float | None:
     return None
 
 
+async def claude_status() -> dict[str, Any]:
+    """Estado do Claude Code para o painel "Conectar" das configurações.
+
+    Só lê o `claude auth status`. O login acontece fora do Interlinear, pelo
+    fluxo da Anthropic; aqui nada passa pelo token nem pelo código de login.
+    """
+    status: dict[str, Any] = {
+        "installed": claude_path() is not None,
+        "docker": in_docker(),
+        "logged_in": False,
+        "subscription": False,
+        "plan": "",
+        "expires_at": None,
+        "error": "",
+    }
+    if not status["installed"]:
+        return status
+    try:
+        data = await ClaudeCliProvider(ProviderConfig(kind="claude_cli")).auth_status()
+    except ProviderError as exc:
+        status["error"] = str(exc)
+        return status
+    logged_in = bool(data.get("loggedIn"))
+    status.update(
+        logged_in=logged_in,
+        subscription=logged_in and data.get("authMethod") == "claude.ai",
+        plan=data.get("subscriptionType") or "",
+        expires_at=data.get("loginExpiresAt"),
+    )
+    return status
+
+
 # --------------------------------------------------------------------------
 # Registro
 # --------------------------------------------------------------------------
@@ -581,9 +634,8 @@ PROVIDER_CATALOG = [
         "default_model": "sonnet",
         "experimental": True,
         "hint": (
-            "Usa o Claude Code instalado e logado nesta máquina, e os limites do "
-            "seu plano Pro ou Max, sem chave de API. Não funciona dentro do Docker. "
-            "Experimental: as regras da Anthropic para esse uso mudaram várias "
+            "Usa o Claude Code, logado com a sua conta, e os limites do seu plano "
+            "Pro ou Max, sem chave de API. Experimental: as regras da Anthropic para esse uso mudaram várias "
             "vezes, e o uso pesado pode restringir a conta. Veja docs/provedores.md."
         ),
     },

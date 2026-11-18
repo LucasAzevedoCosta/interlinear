@@ -44,7 +44,7 @@ with open(log, "a") as out:
     }}) + "\n")
 if sys.argv[1:3] == ["auth", "status"]:
     status = {{"loggedIn": mode != "logged_out", "authMethod": "apiKey" if mode == "api_key" else "claude.ai",
-              "subscriptionType": "max"}}
+              "subscriptionType": "max", "loginExpiresAt": "2027-01-01T00:00:00Z"}}
     print(json.dumps(status)); sys.exit(0)
 if mode == "slow":
     time.sleep(5)
@@ -210,6 +210,65 @@ def test_tarefa_espera_o_limite_renovar_e_continua(monkeypatch):
     assert [b.translated for b in blocks] == ["Olá.", "Tchau."]
     assert notes[0].startswith("Limite do plano atingido. Continua às")
     assert notes[-1] == ""
+
+
+@pytest.fixture
+def api(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.deps import reset_caches
+
+    monkeypatch.setenv("INTERLINEAR_DATA_DIR", str(tmp_path / "dados"))
+    reset_caches()
+    from app.main import app
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        yield client
+    reset_caches()
+
+
+def _status(api) -> dict:
+    return api.get("/api/claude/status").json()["claude"]
+
+
+def test_status_logado_mostra_plano_e_validade(cli, api, monkeypatch):
+    monkeypatch.setenv("INTERLINEAR_DOCKER", "1")
+    status = _status(api)
+    assert status == {
+        "installed": True,
+        "docker": True,
+        "logged_in": True,
+        "subscription": True,
+        "plan": "max",
+        "expires_at": "2027-01-01T00:00:00Z",
+        "error": "",
+    }
+    # Só o status: nada de pedido ao modelo.
+    assert [c["args"][:2] for c in cli()] == [["auth", "status"]]
+
+
+@pytest.mark.parametrize(
+    ("mode", "logged_in", "subscription"),
+    [("logged_out", False, False), ("api_key", True, False)],
+)
+def test_status_sem_a_assinatura(cli, api, monkeypatch, mode, logged_in, subscription):
+    monkeypatch.setenv("FAKE_MODE", mode)
+    status = _status(api)
+    assert (status["logged_in"], status["subscription"]) == (logged_in, subscription)
+
+
+def test_status_sem_claude_code(api, monkeypatch):
+    monkeypatch.setenv("INTERLINEAR_CLAUDE", "/nao/existe/claude")
+    monkeypatch.delenv("INTERLINEAR_DOCKER", raising=False)
+    status = _status(api)
+    assert (status["installed"], status["docker"], status["logged_in"]) == (False, False, False)
+
+
+def test_deslogado_no_docker_ensina_o_caminho_do_docker_desktop(cli, monkeypatch):
+    monkeypatch.setenv("INTERLINEAR_DOCKER", "1")
+    monkeypatch.setenv("FAKE_MODE", "logged_out")
+    with pytest.raises(ProviderError, match="aba Exec"):
+        _complete(_provider())
 
 
 def test_testar_conexao_mostra_o_plano(cli, tmp_path, monkeypatch):

@@ -2,7 +2,12 @@ name: interlinear
 
 services:
   interlinear:
-    build: .
+    build:
+      context: .
+      args:
+        # 1 inclui o Claude Code, para traduzir pela assinatura do Claude
+        # (experimental, ~350 MB a mais). Veja docs/provedores.md.
+        INTERLINEAR_WITH_CLAUDE: ${INTERLINEAR_WITH_CLAUDE:-0}
     image: interlinear:latest
     container_name: interlinear
     restart: unless-stopped
@@ -26,6 +31,9 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - interlinear-data:/data
+      # Login do Claude Code (só com INTERLINEAR_WITH_CLAUDE=1).
+      - interlinear-claude:/claude
 
 volumes:
   interlinear-data:
+  interlinear-claude:

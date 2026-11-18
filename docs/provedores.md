@@ -37,20 +37,47 @@ Antes do primeiro lote de cada tradução, o Interlinear confere com
 `claude auth status` que a CLI está logada **com a conta Claude** (e não com
 uma chave de API). "Testar conexão" mostra o plano.
 
-### Requisitos
+### Com Docker
 
-1. [Claude Code](https://claude.com/claude-code) instalado. Rode `claude` uma
-   vez no terminal e entre com a sua conta Claude.
-2. O Interlinear rodando **direto na máquina**, não no Docker: a CLI e o seu
-   login estão na máquina, fora do container. Isso pede Python 3.11 ou mais
-   novo (veja "Instalação" no README).
+1. No arquivo `.env` ao lado do `compose.yaml`, ponha
+   `INTERLINEAR_WITH_CLAUDE=1`, e reconstrua: `docker compose up -d --build`.
+   A imagem passa a trazer o Claude Code (~350 MB a mais).
+2. Em **Configurações → Adicionar provedor**, escolha "Claude pela
+   assinatura". O painel logo abaixo diz se o Claude Code está logado.
+3. Se não estiver, entre **uma vez**: no Docker Desktop, abra
+   **Containers → interlinear → aba Exec** e rode `claude auth login` (ou,
+   num terminal, `docker exec -it interlinear claude auth login`). Escolha a
+   conta Claude, autorize na página da Anthropic e cole o código que ela
+   mostrar de volta no Exec.
+4. O painel confere sozinho a cada poucos segundos e mostra "Conectado ao
+   Claude, plano …" quando você entrar.
+
+O login fica no volume `interlinear-claude` (pasta `/claude`, via
+`CLAUDE_CONFIG_DIR`) e sobrevive a rebuilds. `docker compose down -v` apaga o
+login junto com os dados. O Claude Code não se atualiza sozinho dentro do
+container: reconstruir a imagem traz a versão nova.
+
+**Por que o login não é feito pela página do Interlinear?** Porque aí o
+Interlinear teria de repassar o link e o código de autorização, e a Anthropic
+proíbe que terceiros ofereçam o login do Claude.ai ou intermediem credenciais.
+O login acontece só no Claude Code, pelo fluxo da Anthropic; a página apenas
+mostra o caminho e lê o `claude auth status` (logado, plano, validade), nunca
+o token.
+
+### Sem Docker
+
+1. [Claude Code](https://claude.com/claude-code) instalado. Rode
+   `claude auth login` no terminal e entre com a sua conta Claude.
+2. O Interlinear rodando direto na máquina, com Python 3.11 ou mais novo
+   (veja "Instalação" no README).
 3. Se o `claude` não estiver no `PATH`, aponte `INTERLINEAR_CLAUDE` para ele.
 
 ### Cadastro
 
 Em **Configurações → Adicionar provedor**, escolha "Claude pela assinatura".
 Não há chave nem endereço. O modelo é um apelido: `haiku` (mais rápido e
-econômico), `sonnet` (o padrão) ou `opus`.
+econômico), `sonnet` (o padrão) ou `opus`. O painel "Conectar" mostra se o
+Claude Code está logado com a assinatura e até quando vale o login.
 
 ### Limites do plano
 

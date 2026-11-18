@@ -11,7 +11,7 @@ import httpx
 from fastapi import APIRouter, Body, HTTPException
 
 from ..ai.base import Message, ProviderConfig, ProviderError
-from ..ai.providers import PROVIDER_CATALOG, build_provider
+from ..ai.providers import PROVIDER_CATALOG, build_provider, claude_status
 from ..ai.translator import Progress, TranslationSettings, Translator
 from ..config import ProviderProfile, Settings
 from ..core.blocks import TRANSLATABLE, Block, Document
@@ -138,6 +138,12 @@ async def delete_provider(provider_id: str) -> dict[str, Any]:
         )
     store.save(settings)
     return {"settings": settings.redacted()}
+
+
+@router.get("/claude/status")
+async def get_claude_status() -> dict[str, Any]:
+    """Se o Claude Code está instalado e logado com a assinatura, e em que plano."""
+    return {"claude": await claude_status()}
 
 
 @router.post("/providers/{provider_id}/test")

@@ -92,6 +92,11 @@ seguintes reaproveitam o que já foi baixado. A porta é publicada só em
   `host.docker.internal`, já configurado. O LM Studio precisa estar servindo
   na rede (opção *Serve on Local Network*), não só em `localhost`.
 - **OCR:** a imagem já traz o Tesseract com português e inglês.
+- **Claude pela assinatura (experimental):** ponha
+  `INTERLINEAR_WITH_CLAUDE=1` no `.env` e reconstrua; a imagem passa a trazer
+  o Claude Code (~350 MB a mais). Em Configurações, o provedor mostra como
+  entrar com a sua conta, uma vez só. O login fica no volume
+  `interlinear-claude` ([docs/provedores.md](docs/provedores.md)).
 - **Logs:** `docker compose logs -f`
 - **Parar:** `docker compose down`
 - **Atualizar:** `git pull` e `docker compose up -d --build` de novo.

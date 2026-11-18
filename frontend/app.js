@@ -1567,6 +1567,143 @@ function applyCatalogDefaults() {
   if (!$('pLabel').value || state.editingProviderId === null) {
     $('pLabel').value = entry.label;
   }
+  updateClaudePanel();
+}
+
+/* Claude pela assinatura. O login é feito no próprio Claude Code, pelo fluxo
+   da Anthropic: o Interlinear não pode intermediar o link nem o código. A
+   página mostra o caminho e confere sozinha, a cada poucos segundos, até
+   ver a conta entrar. */
+
+const CLAUDE_LOGIN = 'claude auth login';
+
+function updateClaudePanel() {
+  const show = $('pKind').value === 'claude_cli';
+  $('claudeConnect').hidden = !show;
+  if (show) checkClaude();
+  else stopClaudePolling();
+}
+
+function stopClaudePolling() {
+  clearInterval(state.claudeTimer);
+  state.claudeTimer = null;
+}
+
+async function checkClaude() {
+  let claude;
+  try {
+    ({ claude } = await api('/api/claude/status'));
+  } catch (error) {
+    claude = { installed: true, error: error.message };
+  }
+  renderClaudePanel(claude);
+
+  if (claude.logged_in && claude.subscription) {
+    if (state.claudeTimer) toast(`Claude conectado${planText(claude.plan)}.`);
+    stopClaudePolling();
+  } else if (claude.installed && !state.claudeTimer) {
+    state.claudeTimer = setInterval(() => {
+      if ($('settingsSheet').hidden || $('claudeConnect').hidden) stopClaudePolling();
+      else checkClaude();
+    }, 3000);
+  }
+}
+
+function planText(plan) {
+  return plan ? `, plano ${plan[0].toUpperCase()}${plan.slice(1)}` : '';
+}
+
+function loginExpiry(value) {
+  if (value == null || value === '') return null;
+  // Época em segundos ou milissegundos, ou data em texto.
+  const date = new Date(typeof value === 'number' && value < 1e12 ? value * 1000 : value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function renderClaudePanel(claude) {
+  const box = $('claudeConnect');
+  box.innerHTML = '';
+  const line = (text, className = 'field__hint') => {
+    const p = document.createElement('p');
+    p.className = className;
+    p.textContent = text;
+    box.append(p);
+    return p;
+  };
+
+  if (claude.logged_in && claude.subscription) {
+    box.dataset.state = 'ok';
+    line(`Conectado ao Claude${planText(claude.plan)}.`, 'connect__status');
+    const expires = loginExpiry(claude.expires_at);
+    if (expires) {
+      const soon = expires - Date.now() < 7 * 24 * 3600 * 1000;
+      line(
+        `O login vale até ${expires.toLocaleDateString('pt-BR')}` +
+          (soon ? '. Expira em breve: entre de novo do mesmo jeito para renovar.' : '.')
+      );
+    }
+    return;
+  }
+
+  box.dataset.state = 'todo';
+  if (!claude.installed) {
+    line(
+      claude.docker
+        ? 'Esta imagem do Interlinear foi construída sem o Claude Code.'
+        : 'O Claude Code não está instalado nesta máquina.',
+      'connect__status'
+    );
+    line(
+      claude.docker
+        ? 'Ponha INTERLINEAR_WITH_CLAUDE=1 no arquivo .env ao lado do compose.yaml e ' +
+            'reconstrua: docker compose up -d --build.'
+        : 'Instale pelo site claude.com/claude-code e volte aqui.'
+    );
+    return;
+  }
+  if (claude.error) {
+    line(claude.error, 'connect__status');
+    return;
+  }
+
+  const command = claude.logged_in ? `claude auth logout && ${CLAUDE_LOGIN}` : CLAUDE_LOGIN;
+  line(
+    claude.logged_in
+      ? 'O Claude Code entrou com uma chave de API, não com a assinatura. Saia e entre com a conta Claude:'
+      : 'Falta entrar com a sua conta Claude. É uma vez só:',
+    'connect__status'
+  );
+
+  const steps = document.createElement('ol');
+  steps.className = 'connect__steps';
+  const step = (...nodes) => {
+    const li = document.createElement('li');
+    li.append(...nodes);
+    steps.append(li);
+  };
+  if (claude.docker) step('No Docker Desktop, abra Containers → interlinear → aba Exec.');
+  const code = document.createElement('code');
+  code.textContent = command;
+  const copy = document.createElement('button');
+  copy.className = 'btn btn--quiet connect__copy';
+  copy.textContent = 'Copiar';
+  copy.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(command);
+      toast('Comando copiado');
+    } catch {
+      toast(`Copie o comando: ${command}`);
+    }
+  };
+  step(claude.docker ? 'Rode ' : 'Num terminal, rode ', code, ' ', copy);
+  step(
+    'Escolha a conta Claude, autorize na página da Anthropic e cole o código que ela ' +
+      `mostrar de volta no ${claude.docker ? 'Exec' : 'terminal'}.`
+  );
+  box.append(steps);
+
+  if (claude.docker) line(`Ou, num terminal: docker exec -it interlinear ${CLAUDE_LOGIN}`);
+  line('Esta página confere sozinha e avisa quando você entrar.', 'field__hint connect__waiting');
 }
 
 function fillProviderForm(provider) {
@@ -1579,7 +1716,10 @@ function fillProviderForm(provider) {
   $('pKey').placeholder = provider.has_key ? 'chave guardada — deixe vazio para manter' : 'cole aqui';
   const entry = state.catalog.find((c) => c.kind === provider.kind);
   $('keyField').style.display = entry?.needs_key === false ? 'none' : '';
+  $('baseField').hidden = entry?.needs_base_url === false;
   $('pHint').textContent = entry?.hint || '';
+  $('pHint').dataset.experimental = Boolean(entry?.experimental);
+  updateClaudePanel();
 }
 
 async function saveProvider() {
