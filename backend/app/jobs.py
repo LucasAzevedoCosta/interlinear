@@ -53,7 +53,7 @@ class Job:
 
     def eta_seconds(self) -> float | None:
         """Estimativa simples: ritmo médio aplicado ao que falta."""
-        completed = self.progress.done + self.progress.failed
+        completed = self.progress.done + self.progress.failed + self.progress.refused
         if completed < 3 or self.progress.total <= completed:
             return None
         rate = completed / max(self.elapsed, 0.001)
@@ -66,6 +66,7 @@ class Job:
             "status": self.status,
             "done": self.progress.done,
             "failed": self.progress.failed,
+            "refused": self.progress.refused,
             "total": self.progress.total,
             "note": self.progress.current_note,
             "input_tokens": self.progress.usage.input_tokens,

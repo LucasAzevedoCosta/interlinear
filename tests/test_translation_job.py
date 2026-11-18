@@ -35,6 +35,7 @@ from app.deps import get_store, reset_caches  # noqa: E402
 from app.routes import ai as ai_routes  # noqa: E402
 
 _SEGMENT_RE = re.compile(r"⟦(\d+)⟧\n(.*?)(?=\n\n⟦|\Z)", re.S)
+REFUSAL = "I can't translate this copyrighted text."
 
 
 class FakeProvider(Provider):
@@ -46,6 +47,8 @@ class FakeProvider(Provider):
         # A partir desta chamada (contando de 1), lança `error` em vez de responder.
         self.fail_from: int | None = None
         self.error = ProviderError("Incorrect API key", status=401)
+        # Recusa qualquer pedido que peça para traduzir um destes textos.
+        self.refuse: set[str] = set()
 
     async def complete(self, messages, *, client) -> Completion:
         self.calls += 1
@@ -54,6 +57,9 @@ class FakeProvider(Provider):
         if self.fail_from is not None and self.calls >= self.fail_from:
             raise self.error
         body = messages[-1].content.split("Segmentos a traduzir:", 1)[-1]
+        # Só o que é para traduzir: o contexto traz os blocos vizinhos.
+        if any(text in body for text in self.refuse):
+            return Completion(text=REFUSAL, usage=Usage(input_tokens=1, output_tokens=1))
         reply = "\n\n".join(
             f"⟦{n}⟧ [pt] {text.strip()}" for n, text in _SEGMENT_RE.findall(body)
         )
@@ -218,6 +224,59 @@ def test_apply_translations_respeita_edicao_feita_depois_de_gravar():
     on_disk.block_index()["b1"].translated = "Olá!"
     ai_routes._apply_translations(on_disk, [block], initial, written)
     assert on_disk.block_index()["b1"].translated == "Olá!"
+
+
+def test_recusa_fica_marcada_e_sai_quando_traduz(client, provider):
+    project_id, ids = _new_project()
+    provider.refuse = {"Paragraph 2."}
+
+    job = _wait_job(client, _start(client, project_id))
+
+    assert (job["status"], job["done"], job["refused"]) == ("done", 3, 1)
+    blocks = get_store().load_document(project_id).block_index()
+    assert blocks[ids[1]].translated is None  # a recusa não vira tradução
+    assert blocks[ids[1]].meta["refused"] == REFUSAL
+
+    # Traduzir de novo tenta o bloco recusado, e só ele.
+    provider.refuse = set()
+    calls = provider.calls
+    assert _wait_job(client, _start(client, project_id))["status"] == "done"
+    assert provider.calls == calls + 1
+    blocks = get_store().load_document(project_id).block_index()
+    assert blocks[ids[1]].translated == "[pt] Paragraph 2."
+    assert "refused" not in blocks[ids[1]].meta
+
+
+def test_traducao_a_mao_tira_a_recusa(client, provider):
+    project_id, ids = _new_project()
+    provider.refuse = {"Paragraph 1."}
+    _wait_job(client, _start(client, project_id))
+
+    client.patch(
+        f"/api/projects/{project_id}/blocks",
+        json={"updates": [{"id": ids[0], "translated": "Parágrafo 1."}]},
+    ).raise_for_status()
+
+    block = get_store().load_document(project_id).block_index()[ids[0]]
+    assert block.translated == "Parágrafo 1."
+    assert "refused" not in block.meta
+
+
+def test_recusa_nao_apaga_traducao_desatualizada(client, provider):
+    project_id, ids = _new_project()
+    _wait_job(client, _start(client, project_id))
+    client.patch(
+        f"/api/projects/{project_id}/blocks",
+        json={"updates": [{"id": ids[0], "text": "Paragraph 1, revised."}]},
+    ).raise_for_status()
+    provider.refuse = {"revised"}
+
+    _wait_job(client, _start(client, project_id))
+
+    block = get_store().load_document(project_id).block_index()[ids[0]]
+    assert block.translated == "[pt] Paragraph 1."
+    assert block.meta["stale"] is True
+    assert block.meta["refused"] == REFUSAL
 
 
 def test_traduzir_refaz_so_o_que_ficou_desatualizado(client, provider):

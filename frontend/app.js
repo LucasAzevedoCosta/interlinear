@@ -644,7 +644,10 @@ function chapterProgress(chapter) {
   );
   const done = translatable.filter((b) => b.translated && b.translated.trim());
   const stale = done.filter((b) => b.meta?.stale);
-  return { done: done.length, total: translatable.length, stale: stale.length };
+  const refused = translatable.filter((b) => b.meta?.refused);
+  return {
+    done: done.length, total: translatable.length, stale: stale.length, refused: refused.length,
+  };
 }
 
 function chapterPages(chapter) {
@@ -721,6 +724,7 @@ const KIND_LABELS = {
 
 function blockState(block) {
   if (block.translated && block.meta?.stale) return 'stale';
+  if (block.meta?.refused && !block.translated?.trim()) return 'refused';
   if (block.meta?.edited) return 'human';
   if (block.translated && block.translated.trim()) return 'machine';
   return 'pending';
@@ -756,10 +760,11 @@ function renderEditor() {
       note.append(link);
     }
   } else {
-    const { done, total, stale } = chapterProgress(chapter);
+    const { done, total, stale, refused } = chapterProgress(chapter);
     note.textContent = total
       ? `${done} de ${total} parágrafos traduzidos.` +
         (stale ? ` ${stale} com o original alterado depois da tradução.` : '') +
+        (refused ? ` ${refused} que o modelo se recusou a traduzir.` : '') +
         ' O texto original fica acima de cada campo.'
       : 'Capítulo sem texto traduzível.';
     note.append(' ', ...bookTranslationLine());
@@ -912,6 +917,29 @@ function renderTranslation(block, wrapper) {
   stale.append(keep);
   wrapper.append(stale);
 
+  // A recusa não entra como tradução. A resposta fica à vista porque a
+  // detecção pode errar: aí o botão aceita a resposta como tradução.
+  const refused = document.createElement('details');
+  refused.className = 'block__refused';
+  refused.hidden = !block.meta?.refused;
+  const summary = document.createElement('summary');
+  summary.textContent =
+    'O modelo se recusou a traduzir este trecho. Tente de novo, traduza à mão ou use outro provedor.';
+  const reply = document.createElement('p');
+  reply.textContent = block.meta?.refused || '';
+  const accept = document.createElement('button');
+  accept.className = 'editor__link';
+  accept.textContent = 'É tradução: usar esta resposta';
+  refused.append(summary, reply, accept);
+  wrapper.append(refused);
+
+  const dropRefusal = () => {
+    if (!block.meta?.refused) return;
+    const { refused: _, ...meta } = block.meta;
+    block.meta = meta;
+    refused.hidden = true;
+  };
+
   const field = document.createElement('textarea');
   field.className = 'block__field';
   field.rows = 1;
@@ -926,10 +954,16 @@ function renderTranslation(block, wrapper) {
     block.translated = field.value;
     block.meta = { ...(block.meta || {}), edited: true, stale: false };
     stale.hidden = true;
+    dropRefusal();  // gravar a tradução desfaz a recusa no servidor também
     wrapper.dataset.state = blockState(block);
     markDirty(block);
   };
   field.onblur = () => flushSaves();
+  accept.onclick = () => {
+    field.value = block.meta.refused;
+    field.dispatchEvent(new Event('input'));
+    flushSaves();
+  };
 
   wrapper.append(field);
   requestAnimationFrame(grow);
@@ -954,6 +988,7 @@ function renderTranslation(block, wrapper) {
     block.translated = null;
     block.meta = { ...(block.meta || {}), edited: false, stale: false };
     stale.hidden = true;
+    dropRefusal();
     wrapper.dataset.state = 'pending';
     markDirty(block, true);
     grow();
@@ -1175,10 +1210,13 @@ function updateStat() {
   const pct = project.total_translatable
     ? Math.round((project.translated_count / project.total_translatable) * 100)
     : 0;
-  const stale = state.doc.chapters.reduce((sum, c) => sum + chapterProgress(c).stale, 0);
+  const count = (key) => state.doc.chapters.reduce((sum, c) => sum + chapterProgress(c)[key], 0);
+  const stale = count('stale');
+  const refused = count('refused');
   $('bookStat').textContent =
     `${words} · ${pct}% traduzido` +
-    (stale ? ` · ${stale} ${stale === 1 ? 'desatualizado' : 'desatualizados'}` : '');
+    (stale ? ` · ${stale} ${stale === 1 ? 'desatualizado' : 'desatualizados'}` : '') +
+    (refused ? ` · ${refused} ${refused === 1 ? 'recusado' : 'recusados'}` : '');
 }
 
 /* ---------------------------------------------------------------- preview */
@@ -1246,11 +1284,12 @@ function parseGlossary(text) {
 function showProgress(job) {
   $('progress').hidden = false;
   const total = job.total || 1;
-  const completed = job.done + job.failed;
+  const completed = job.done + job.failed + (job.refused || 0);
   $('progressFill').style.width = `${Math.round((completed / total) * 100)}%`;
 
   let label = `${job.done}/${job.total}`;
   if (job.failed) label += ` · ${job.failed} falhas`;
+  if (job.refused) label += ` · ${job.refused} recusados`;
   if (job.eta_seconds != null) label += ` · faltam ${formatDuration(job.eta_seconds)}`;
   // A pausa pelo limite do plano aparece no lugar da estimativa.
   if (job.note?.startsWith('Limite do plano')) label = `${job.done}/${job.total} · ${job.note}`;
@@ -1292,7 +1331,9 @@ async function pollJob() {
     } else if (job.status === 'stopped') {
       toast('Tradução interrompida. O que já foi feito está salvo.');
     } else {
-      const note = job.failed ? ` ${job.failed} parágrafos falharam.` : '';
+      const note =
+        (job.failed ? ` ${job.failed} parágrafos falharam.` : '') +
+        (job.refused ? ` O modelo se recusou a traduzir ${job.refused}: estão marcados no texto.` : '');
       toast(`Tradução concluída.${note}`);
     }
 

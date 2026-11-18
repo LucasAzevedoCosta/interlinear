@@ -197,7 +197,8 @@ async def update_blocks(
 
     Mudar o original de um bloco já traduzido marca a tradução como
     desatualizada (meta.stale); a próxima tradução refaz o bloco. Gravar uma
-    tradução nova, à mão, desfaz a marca.
+    tradução nova, à mão, desfaz a marca, e também a recusa do modelo
+    (meta.refused).
     """
     store = get_store()
 
@@ -224,6 +225,7 @@ async def update_blocks(
                 value = update["translated"]
                 block.translated = None if value is None else str(value)
                 block.meta.pop("stale", None)
+                block.meta.pop("refused", None)
             if "kind" in update and update["kind"]:
                 kind = str(update["kind"])
                 # Só entre tipos de texto: virar imagem pediria um arquivo.

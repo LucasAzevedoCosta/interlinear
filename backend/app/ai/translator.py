@@ -72,6 +72,7 @@ class Progress:
     done: int = 0
     total: int = 0
     failed: int = 0
+    refused: int = 0  # o modelo se recusou a traduzir
     usage: Usage = field(default_factory=Usage)
     current_note: str = ""
 
@@ -94,6 +95,54 @@ PLAN_LIMIT_MARGIN = 30.0
 
 def is_fatal(exc: ProviderError) -> bool:
     return exc.fatal or (not exc.retryable and exc.status in FATAL_STATUSES)
+
+
+# --------------------------------------------------------------------------
+# Recusas
+# --------------------------------------------------------------------------
+
+
+class Refusal(str):
+    """Resposta em que o modelo se recusou a traduzir o trecho.
+
+    Não é tradução e não vai para block.translated: fica em
+    block.meta["refused"], para o usuário ver e decidir.
+    """
+
+
+# O começo de uma recusa, em inglês, português e espanhol...
+_REFUSAL_OPENING = re.compile(
+    r"\bi\s*(?:can[’']?t|cannot|can not|won[’']?t|will not|am not able|[’']m not able"
+    r"|am unable|[’']m unable)\b"
+    r"|\bi[’']m sorry\b|\bsorry, but\b|\bunfortunately,? i\b"
+    r"|\bnão (?:posso|consigo|é possível)\b|\bdesculpe\b|\blamento\b|\binfelizmente,? não\b"
+    r"|\bno (?:puedo|es posible)\b|\blo siento\b|\blamentablemente\b",
+    re.IGNORECASE,
+)
+# ...e o assunto dela: direitos autorais, reproduzir ou traduzir o texto.
+_REFUSAL_SUBJECT = re.compile(
+    r"copyright|direitos autorais|derechos de autor"
+    r"|(?:material|texto|obra|conteúdo) protegid|protected (?:text|material|work|content)"
+    r"|reprodu|translat|tradu",
+    re.IGNORECASE,
+)
+# A recusa diz a que veio logo no começo.
+_REFUSAL_WINDOW = 300
+
+
+def looks_like_refusal(reply: str, source: str) -> bool:
+    """Diz se a resposta é uma recusa em vez da tradução de `source`.
+
+    Pede as duas coisas no começo da resposta: uma frase de recusa ("não
+    posso", "I can't") e o assunto dela (direitos autorais, traduzir). Um
+    original que já começa assim ("I can't," she said) é diálogo, não recusa.
+    A regra pode errar; por isso a recusa é guardada e o usuário pode
+    aceitá-la como tradução.
+    """
+    head = reply[:_REFUSAL_WINDOW]
+    if not (_REFUSAL_OPENING.search(head) and _REFUSAL_SUBJECT.search(head)):
+        return False
+    return not _REFUSAL_OPENING.search(source[:_REFUSAL_WINDOW])
 
 
 # --------------------------------------------------------------------------
@@ -239,7 +288,10 @@ class Translator:
         before: Sequence[Block] = (),
         after: Sequence[Block] = (),
     ) -> tuple[list[str], Usage]:
-        """Traduz um lote, com verificação de formato e plano B individual."""
+        """Traduz um lote, com verificação de formato e plano B individual.
+
+        Cada item devolvido é a tradução, "" (falhou) ou uma Refusal.
+        """
         if not batch:
             return [], Usage()
 
@@ -258,7 +310,18 @@ class Translator:
         segments = _parse_segments(completion.text, len(batch))
 
         if segments is not None:
-            return segments, completion.usage
+            refused = [
+                block for block, segment in zip(batch, segments)
+                if looks_like_refusal(segment, block.text)
+            ]
+            if not refused:
+                return segments, completion.usage
+            # Recusa num segmento só: ele tenta de novo sozinho, fora do lote.
+            retried, usage = await self._translate_individually(
+                refused, base_usage=completion.usage
+            )
+            again = dict(zip(map(id, refused), retried))
+            return [again.get(id(b), s) for b, s in zip(batch, segments)], usage
 
         log.warning(
             "Lote de %d segmentos voltou fora do formato; traduzindo individualmente",
@@ -290,7 +353,12 @@ class Translator:
                     messages, client=self.client
                 )
                 usage = usage + completion.usage
-                results.append(_clean_single(completion.text))
+                text = _clean_single(completion.text)
+                if looks_like_refusal(text, block.text):
+                    log.warning("O modelo recusou o bloco %s", block.id)
+                    results.append(Refusal(text))
+                else:
+                    results.append(text)
             except ProviderError as exc:
                 # O limite do plano sobe para o lote inteiro esperar e ser refeito.
                 if is_fatal(exc) or isinstance(exc, PlanLimitError):
@@ -319,6 +387,9 @@ class Translator:
 
         Quando o limite do plano da assinatura acaba (PlanLimitError), todos os
         lotes esperam a janela renovar e continuam; current_note diz até quando.
+
+        Um trecho que o modelo se recusou a traduzir fica sem tradução, com a
+        resposta em block.meta["refused"].
         """
         pending = [b for b in blocks if b.text.strip()]
         batches = build_batches(pending, max_chars=self.settings.batch_chars)
@@ -396,14 +467,24 @@ class Translator:
 
             async with lock:
                 for block, translation in zip(batch, segments):
-                    if translation:
+                    if isinstance(translation, Refusal):
+                        block.meta["refused"] = str(translation)
+                        progress.refused += 1
+                    elif translation:
                         block.translated = translation
+                        block.meta.pop("refused", None)
                         progress.done += 1
                     else:
                         progress.failed += 1
-                consecutive_failures = 0
                 progress.usage = progress.usage + usage
                 progress.current_note = ""
+                # Um modelo que recusa tudo gastaria o plano inteiro recusando.
+                if all(isinstance(t, Refusal) for t in segments):
+                    consecutive_failures += 1
+                    if not abort and consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                        abort.append(ProviderError("O modelo recusou traduzir o livro."))
+                else:
+                    consecutive_failures = 0
                 await _notify(on_progress, progress)
 
         await asyncio.gather(*(run_batch(batch) for batch in batches))

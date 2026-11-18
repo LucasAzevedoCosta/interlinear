@@ -349,3 +349,15 @@ Converter e traduzir um livro para uso pessoal é uma coisa; publicar ou
 distribuir a tradução é outra, e depende de autorização de quem detém os
 direitos. Esta ferramenta não verifica nada disso — a responsabilidade é de
 quem usa.
+
+Comprar o livro dá o direito de lê-lo, não necessariamente o de traduzi-lo:
+no Brasil, a Lei 9.610/98 pede autorização do autor para a tradução (art. 29),
+e a exceção de uso privado cobre só pequenos trechos (art. 46). O Interlinear
+lê arquivos sem DRM, inclusive os que trazem o nome do comprador como marca
+d'água; arquivos com DRM (Adobe, Kindle) ele não abre, e não remove o DRM.
+
+O modelo de IA também pode se recusar a traduzir um trecho, por entender que
+é uma obra protegida. A recusa não entra no livro como tradução: o bloco fica
+sem tradução, com um aviso e a resposta do modelo à vista. Dá para tentar de
+novo, traduzir à mão ou usar outro provedor. Se a detecção errar e a resposta
+for de fato a tradução, o botão "É tradução: usar esta resposta" a aceita.

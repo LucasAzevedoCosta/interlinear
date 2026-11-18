@@ -282,9 +282,11 @@ async def start_translation(
     initial = {block.id: block.translated for block in candidates}
     written: dict[str, str | None] = {}
     # Na cópia, None quer dizer "a tarefa ainda não chegou aqui", mesmo num
-    # bloco que já tinha tradução (desatualizada, ou retranslate).
+    # bloco que já tinha tradução (desatualizada, ou retranslate). A recusa de
+    # uma tarefa anterior também sai: só conta a desta.
     for block in candidates:
         block.translated = None
+        block.meta.pop("refused", None)
 
     def persist() -> None:
         project_store.update(
@@ -425,17 +427,25 @@ def _apply_translations(
     começou ou o que a própria tarefa gravou antes. Qualquer outro valor é uma
     edição do usuário feita durante a tradução, e a edição vence. Blocos que
     sumiram (capítulo apagado, por exemplo) são ignorados.
+
+    Um bloco que o modelo recusou fica com a tradução que tinha, e a recusa
+    vai para meta.refused.
     """
     on_disk = document.block_index()
     for block in translated_blocks:
-        if block.translated is None:
+        refusal = block.meta.get("refused")
+        if block.translated is None and not refusal:
             continue  # a tarefa ainda não traduziu este bloco
         target = on_disk.get(block.id)
         if target is None:
             continue
         if target.translated not in (initial[block.id], written.get(block.id)):
             continue
+        if block.translated is None:
+            target.meta["refused"] = refusal
+            continue
         target.translated = block.translated
+        target.meta.pop("refused", None)
         written[block.id] = block.translated
         # Atualizada, se traduziu o original que está lá. Se o usuário mudou o
         # original durante a tarefa, a tradução já nasce desatualizada.

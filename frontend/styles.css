@@ -469,6 +469,21 @@ button {
   margin: 0 0 6px;
 }
 
+.block[data-state="refused"] { border-left: 2px dashed var(--alert); }
+.block__refused {
+  font-size: 12px;
+  color: var(--alert);
+  margin: 0 0 6px;
+}
+.block__refused summary { cursor: pointer; }
+.block__refused p {
+  margin: 6px 0;
+  padding: 6px 8px;
+  color: var(--ink);
+  background: #fbeeea;
+  white-space: pre-wrap;
+}
+
 /* Botão com cara de link, dentro de um texto. */
 .editor__link {
   color: var(--pencil-deep);
