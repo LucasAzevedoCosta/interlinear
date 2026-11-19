@@ -290,4 +290,5 @@ def test_testar_conexao_mostra_o_plano(cli, tmp_path, monkeypatch):
     reset_caches()
 
     assert result["ok"] and result["plan"] == "max"
-    assert models == ["haiku", "sonnet", "opus"]
+    assert [m["id"] for m in models] == ["haiku", "sonnet", "opus"]
+    assert all(m["note"] for m in models)

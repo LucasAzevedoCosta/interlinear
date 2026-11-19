@@ -183,7 +183,38 @@ async def test_provider(provider_id: str) -> dict[str, Any]:
 async def list_provider_models(provider_id: str) -> dict[str, Any]:
     settings = get_settings_store().load()
     provider, _ = _resolve_provider(settings, provider_id)
+    return {"models": await _list_models(provider)}
 
+
+@router.post("/providers/models")
+async def list_draft_models(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """Lista os modelos com o que está no formulário, antes de salvar.
+
+    Espera {"kind", "base_url", "api_key", "provider_id"}. Sem api_key, vale a
+    chave guardada do provider_id (editando um provedor) ou a da variável de
+    ambiente do serviço.
+    """
+    settings = get_settings_store().load()
+    kind = str(payload.get("kind") or "")
+    api_key = str(payload.get("api_key") or "")
+    if not api_key and payload.get("provider_id"):
+        saved = settings.get_provider(str(payload["provider_id"]))
+        # A chave guardada só serve para o mesmo serviço.
+        if saved is not None and saved.kind == kind:
+            api_key = saved.api_key
+    draft = ProviderProfile(
+        id="", label="", kind=kind, base_url=str(payload.get("base_url") or ""), api_key=api_key
+    )
+    try:
+        provider = build_provider(
+            ProviderConfig(kind=kind, api_key=settings.resolved_key(draft), base_url=draft.base_url)
+        )
+    except ProviderError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"models": await _list_models(provider)}
+
+
+async def _list_models(provider) -> list[dict[str, Any]]:
     async with httpx.AsyncClient(follow_redirects=True) as client:
         try:
             models = await provider.list_models(client=client)
@@ -191,8 +222,7 @@ async def list_provider_models(provider_id: str) -> dict[str, Any]:
             raise HTTPException(502, str(exc)) from exc
         except (httpx.TimeoutException, httpx.TransportError) as exc:
             raise HTTPException(502, f"Não foi possível conectar: {exc}") from exc
-
-    return {"models": models}
+    return [model.to_dict() for model in models]
 
 
 # --------------------------------------------------------------------------

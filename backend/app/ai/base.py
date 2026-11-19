@@ -84,6 +84,24 @@ class Usage:
 
 
 @dataclass
+class ModelInfo:
+    """Um modelo na lista do seletor."""
+
+    id: str
+    name: str = ""  # nome de exibição, quando o provedor informa
+    created: float = 0.0  # época de lançamento; 0 quando o provedor não diz
+    note: str = ""  # detalhe curto: tamanho, para que serve
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"id": self.id, "name": self.name, "created": self.created, "note": self.note}
+
+
+def newest_first(models: list[ModelInfo]) -> list[ModelInfo]:
+    """Mais novos primeiro; sem data, em ordem alfabética, depois dos datados."""
+    return sorted(models, key=lambda m: (-m.created, m.id))
+
+
+@dataclass
 class Completion:
     text: str
     usage: Usage = field(default_factory=Usage)
@@ -102,8 +120,8 @@ class Provider(ABC):
         """Envia as mensagens e devolve a resposta do modelo."""
 
     @abstractmethod
-    async def list_models(self, *, client: httpx.AsyncClient) -> list[str]:
-        """Lista os modelos disponíveis, para preencher o seletor da interface."""
+    async def list_models(self, *, client: httpx.AsyncClient) -> list[ModelInfo]:
+        """Lista os modelos que geram texto, para preencher o seletor da interface."""
 
     # -- utilidades compartilhadas ---------------------------------------
 

@@ -144,21 +144,55 @@ def test_google_bloqueado_vira_erro_com_motivo():
 def test_ollama_lista_modelos_pela_api_nativa():
     def handler(request):
         assert request.url.path == "/api/tags"
-        return httpx.Response(200, json={"models": [{"name": "qwen:14b"}, {"name": "gemma:12b"}]})
+        return httpx.Response(200, json={"models": [
+            {"name": "qwen:14b", "size": 9_000_000_000, "details": {"parameter_size": "14.8B"}},
+            {"name": "gemma:12b"},
+            {"name": "nomic-embed-text"},
+        ]})
 
     models, _ = _run("ollama", handler, call="models", base_url="http://host:11434/v1")
-    assert models == ["gemma:12b", "qwen:14b"]
+    assert [m.id for m in models] == ["gemma:12b", "qwen:14b"]
+    assert models[1].note == "14.8B · 9.0 GB"
 
 
 def test_google_lista_so_modelos_que_geram_texto():
     def handler(request):
         return httpx.Response(200, json={"models": [
-            {"name": "models/gemini-x", "supportedGenerationMethods": ["generateContent"]},
+            {"name": "models/gemini-x", "displayName": "Gemini X",
+             "supportedGenerationMethods": ["generateContent"]},
             {"name": "models/embed-y", "supportedGenerationMethods": ["embedContent"]},
+            {"name": "models/gemini-x-image", "supportedGenerationMethods": ["generateContent"]},
         ]})
 
     models, _ = _run("google", handler, call="models", api_key="k")
-    assert models == ["gemini-x"]
+    assert [(m.id, m.name) for m in models] == [("gemini-x", "Gemini X")]
+
+
+def test_openai_lista_so_texto_e_mais_novos_primeiro():
+    def handler(request):
+        return httpx.Response(200, json={"data": [
+            {"id": "gpt-old", "created": 100},
+            {"id": "text-embedding-3-small", "created": 500},
+            {"id": "whisper-1", "created": 400},
+            {"id": "gpt-new", "created": 300},
+            {"id": "tts-1-hd", "created": 350},
+            {"id": "gpt-image-1", "created": 600},
+            {"id": "sem-data"},
+        ]})
+
+    models, _ = _run("openai", handler, call="models", api_key="k")
+    assert [m.id for m in models] == ["gpt-new", "gpt-old", "sem-data"]
+
+
+def test_anthropic_lista_com_nome_e_data():
+    def handler(request):
+        return httpx.Response(200, json={"data": [
+            {"id": "claude-a", "display_name": "Claude A", "created_at": "2025-01-01T00:00:00Z"},
+            {"id": "claude-b", "display_name": "Claude B", "created_at": "2026-01-01T00:00:00Z"},
+        ]})
+
+    models, _ = _run("anthropic", handler, call="models", api_key="k")
+    assert [(m.id, m.name) for m in models] == [("claude-b", "Claude B"), ("claude-a", "Claude A")]
 
 
 def test_provedor_desconhecido():

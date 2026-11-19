@@ -300,11 +300,18 @@
 
     <div class="field">
       <label for="pModel">Modelo</label>
-      <div class="row">
-        <input type="text" id="pModel" placeholder="ex.: gemini-2.5-flash" list="modelOptions"/>
-        <button class="btn" id="loadModels" style="flex:0 0 auto">Listar modelos</button>
+      <div class="model-field" id="modelRow">
+        <div class="row">
+          <input type="text" id="pModel" placeholder="escolha na lista ou digite o nome"
+                 autocomplete="off" spellcheck="false" role="combobox"
+                 aria-autocomplete="list" aria-controls="modelPicker" aria-expanded="false"/>
+          <button class="btn" id="loadModels" style="flex:0 0 auto">Listar modelos</button>
+        </div>
+        <div class="model-picker" id="modelPicker" role="listbox" hidden></div>
       </div>
-      <datalist id="modelOptions"></datalist>
+      <!-- Serviços com poucos modelos fixos (Claude pela assinatura): opções. -->
+      <div class="model-choices" id="modelChoices" role="radiogroup" aria-label="Modelo" hidden></div>
+      <p class="field__hint" id="modelHint"></p>
     </div>
 
     <div class="row">

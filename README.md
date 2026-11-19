@@ -203,6 +203,12 @@ palavras gasta na casa de 250 a 400 mil tokens de entrada e outro tanto de
 saída. Compensa testar um capítulo em dois ou três modelos e comparar antes de
 soltar o livro inteiro.
 
+O campo **Modelo** busca a lista no próprio serviço assim que há chave (ou
+direto, nos locais), sem precisar salvar antes: os mais novos vêm primeiro,
+com nome e data quando o serviço informa, e modelos que não traduzem
+(embeddings, áudio, imagem) ficam de fora. Digite para filtrar; um nome fora
+da lista também vale, se o serviço aceitar.
+
 Modelos locais (LM Studio, Ollama) não têm custo por token e mantêm o texto na
 sua máquina, ao preço de mais tempo de processamento. Num Mac com Apple
 Silicon, um modelo de 12B a 14B em 4 bits é um bom ponto de partida.

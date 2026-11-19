@@ -22,6 +22,11 @@ const state = {
   settings: null,
   catalog: [],
   editingProviderId: null,
+  providerHasKey: false,
+  // Modelos do serviço escolhido no formulário de provedor.
+  models: [],
+  pickerIndex: -1,
+  claudeTimer: null,
   jobId: null,
   jobTimer: null,
   // "convert" ou "translate": a etapa aberta (ver setStage).
@@ -1491,7 +1496,11 @@ function renderSettings() {
       option.textContent = entry.label;
       kindSelect.append(option);
     }
-    kindSelect.onchange = applyCatalogDefaults;
+    kindSelect.onchange = () => {
+      // O modelo de um serviço não vale no outro.
+      $('pModel').value = '';
+      applyCatalogDefaults();
+    };
     applyCatalogDefaults();
   }
 
@@ -1568,6 +1577,7 @@ function applyCatalogDefaults() {
     $('pLabel').value = entry.label;
   }
   updateClaudePanel();
+  refreshModels();
 }
 
 /* Claude pela assinatura. O login é feito no próprio Claude Code, pelo fluxo
@@ -1720,6 +1730,8 @@ function fillProviderForm(provider) {
   $('pHint').textContent = entry?.hint || '';
   $('pHint').dataset.experimental = Boolean(entry?.experimental);
   updateClaudePanel();
+  state.providerHasKey = provider.has_key;
+  refreshModels();
 }
 
 async function saveProvider() {
@@ -1739,6 +1751,7 @@ async function saveProvider() {
       body: JSON.stringify(payload),
     });
     state.editingProviderId = data.provider.id;
+    state.providerHasKey = data.provider.has_key;
     $('pKey').value = '';
     toast('Provedor salvo');
     loadSettings();
@@ -1767,24 +1780,221 @@ async function testProvider() {
   }
 }
 
-async function loadModels() {
-  if (!state.editingProviderId) {
-    toast('Salve o provedor primeiro para listar os modelos', 'error');
+/* Modelo: uma lista com busca, carregada do próprio serviço com o que está no
+   formulário, sem precisar salvar antes. Digitar um nome fora da lista
+   continua valendo (modelo recém-lançado, endpoint que não lista). */
+
+const MODEL_PICKER_MAX = 60;
+
+function currentEntry() {
+  return state.catalog.find((c) => c.kind === $('pKind').value);
+}
+
+// Carrega sozinho quando dá: serviço sem chave, chave digitada ou guardada.
+function refreshModels() {
+  state.models = [];
+  renderModelField();
+  const entry = currentEntry();
+  if (!entry) return;
+  const hasKey = $('pKey').value.trim() || (state.editingProviderId && state.providerHasKey);
+  if (!entry.needs_key || hasKey) loadModels({ quiet: true });
+}
+
+async function loadModels({ quiet = false } = {}) {
+  const entry = currentEntry();
+  if (!entry) return;
+  const kind = entry.kind;
+  $('modelHint').textContent = 'Buscando os modelos…';
+  try {
+    const data = await api('/api/providers/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind,
+        base_url: $('pBase').value.trim(),
+        api_key: $('pKey').value.trim(),
+        provider_id: state.editingProviderId || undefined,
+      }),
+    });
+    if ($('pKind').value !== kind) return; // trocou de serviço no meio
+    state.models = data.models;
+    renderModelField();
+    if (!quiet && !entry.fixed_models) {
+      $('pModel').focus();
+      openModelPicker();
+    }
+  } catch (error) {
+    if ($('pKind').value !== kind) return;
+    state.models = [];
+    renderModelField();
+    $('modelHint').textContent = `Não foi possível listar os modelos: ${error.message}`;
+    if (!quiet) toast(error.message, 'error');
+  }
+}
+
+function renderModelField() {
+  const fixed = Boolean(currentEntry()?.fixed_models);
+  $('modelRow').hidden = fixed;
+  $('modelChoices').hidden = !fixed;
+  closeModelPicker();
+  if (fixed) renderModelChoices();
+  describeModel();
+}
+
+function renderModelChoices() {
+  const box = $('modelChoices');
+  box.innerHTML = '';
+  for (const model of state.models) {
+    const choice = document.createElement('button');
+    choice.type = 'button';
+    choice.className = 'model-choice';
+    choice.setAttribute('role', 'radio');
+    choice.setAttribute('aria-checked', model.id === $('pModel').value);
+    const name = document.createElement('strong');
+    name.textContent = model.name || model.id;
+    const note = document.createElement('span');
+    note.textContent = model.note;
+    choice.append(name, note);
+    choice.onclick = () => {
+      $('pModel').value = model.id;
+      renderModelChoices();
+      describeModel();
+    };
+    box.append(choice);
+  }
+}
+
+function modelDate(model) {
+  if (!model.created) return '';
+  return new Date(model.created * 1000).toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' });
+}
+
+// A linha embaixo do campo: o que é o modelo escolhido, ou o tamanho da lista.
+function describeModel() {
+  if (currentEntry()?.fixed_models) {
+    $('modelHint').textContent = '';
     return;
   }
-  try {
-    const data = await api(`/api/providers/${state.editingProviderId}/models`);
-    const list = $('modelOptions');
-    list.innerHTML = '';
-    for (const model of data.models) {
-      const option = document.createElement('option');
-      option.value = model;
-      list.append(option);
-    }
-    toast(`${data.models.length} modelos disponíveis. Clique no campo para ver.`);
-  } catch (error) {
-    toast(error.message, 'error');
+  const value = $('pModel').value.trim();
+  const chosen = state.models.find((m) => m.id === value);
+  if (chosen) {
+    $('modelHint').textContent = [chosen.name, modelDate(chosen), chosen.note]
+      .filter(Boolean).join(' · ');
+  } else if (state.models.length) {
+    const dated = state.models.some((m) => m.created);
+    $('modelHint').textContent =
+      `${state.models.length} ${state.models.length === 1 ? 'modelo' : 'modelos'}` +
+      (dated ? ', os mais novos primeiro.' : '.') +
+      (value ? ' Este nome não está na lista; vale se o serviço aceitar.' : '');
+  } else {
+    $('modelHint').textContent = '';
   }
+}
+
+function modelMatches() {
+  const value = $('pModel').value.trim();
+  const query = value.toLowerCase();
+  // Com um nome da lista já escolhido, mostra tudo para dar para trocar.
+  if (!query || state.models.some((m) => m.id === value)) return state.models;
+  return state.models.filter((m) => `${m.id} ${m.name}`.toLowerCase().includes(query));
+}
+
+function openModelPicker() {
+  if (!state.models.length || currentEntry()?.fixed_models) return;
+  state.pickerIndex = -1;
+  renderModelPicker();
+}
+
+function closeModelPicker() {
+  $('modelPicker').hidden = true;
+  $('pModel').setAttribute('aria-expanded', 'false');
+  $('pModel').removeAttribute('aria-activedescendant');
+}
+
+function renderModelPicker() {
+  const picker = $('modelPicker');
+  const matches = modelMatches();
+  picker.innerHTML = '';
+
+  matches.slice(0, MODEL_PICKER_MAX).forEach((model, index) => {
+    const option = document.createElement('div');
+    option.className = 'model-option';
+    option.id = `model-option-${index}`;
+    option.setAttribute('role', 'option');
+    option.setAttribute('aria-selected', index === state.pickerIndex);
+    const title = document.createElement('span');
+    title.className = 'model-option__name';
+    title.textContent = model.name && model.name !== model.id ? model.name : model.id;
+    const meta = document.createElement('span');
+    meta.className = 'model-option__meta';
+    meta.textContent = [model.name && model.name !== model.id ? model.id : '', modelDate(model), model.note]
+      .filter(Boolean).join(' · ');
+    option.append(title, meta);
+    // mousedown, não click: o campo perderia o foco e fecharia a lista antes.
+    option.onmousedown = (event) => {
+      event.preventDefault();
+      chooseModel(model.id);
+    };
+    picker.append(option);
+  });
+
+  const footer = (text) => {
+    const p = document.createElement('p');
+    p.className = 'model-picker__note';
+    p.textContent = text;
+    picker.append(p);
+  };
+  if (!matches.length) footer('Nenhum modelo com esse nome. Pode usar assim mesmo, se o serviço aceitar.');
+  else if (matches.length > MODEL_PICKER_MAX) {
+    footer(`E mais ${matches.length - MODEL_PICKER_MAX}: digite para filtrar.`);
+  }
+
+  picker.hidden = false;
+  $('pModel').setAttribute('aria-expanded', 'true');
+  if (state.pickerIndex >= 0) {
+    $('pModel').setAttribute('aria-activedescendant', `model-option-${state.pickerIndex}`);
+    picker.children[state.pickerIndex]?.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function chooseModel(id) {
+  $('pModel').value = id;
+  closeModelPicker();
+  describeModel();
+}
+
+function bindModelField() {
+  const field = $('pModel');
+  field.onfocus = openModelPicker;
+  field.onblur = closeModelPicker;
+  field.oninput = () => {
+    state.pickerIndex = -1;
+    if (state.models.length) renderModelPicker();
+    describeModel();
+  };
+  field.onkeydown = (event) => {
+    const picker = $('modelPicker');
+    const count = Math.min(modelMatches().length, MODEL_PICKER_MAX);
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (!state.models.length) return;
+      event.preventDefault();
+      if (picker.hidden) return openModelPicker();
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      state.pickerIndex = (state.pickerIndex + step + count) % Math.max(count, 1);
+      renderModelPicker();
+    } else if (event.key === 'Enter' && !picker.hidden && state.pickerIndex >= 0) {
+      event.preventDefault();
+      chooseModel(modelMatches()[state.pickerIndex].id);
+    } else if (event.key === 'Escape' && !picker.hidden) {
+      event.preventDefault();
+      event.stopPropagation(); // fecha a lista, não as configurações
+      closeModelPicker();
+    }
+  };
+  // Chave ou endereço novos: a lista pode mudar.
+  $('pKey').onchange = refreshModels;
+  $('pBase').onchange = refreshModels;
+  $('loadModels').onclick = () => loadModels();
 }
 
 async function saveGeneralSettings() {
@@ -1899,7 +2109,7 @@ function wire() {
 
   $('saveProvider').onclick = saveProvider;
   $('testProvider').onclick = testProvider;
-  $('loadModels').onclick = loadModels;
+  bindModelField();
   $('saveSettings').onclick = saveGeneralSettings;
 
   $('viewTranslated').onclick = () => setPreviewMode(true);

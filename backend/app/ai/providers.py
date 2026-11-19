@@ -28,6 +28,7 @@ import httpx
 from .base import (
     Completion,
     Message,
+    ModelInfo,
     PlanLimitError,
     Provider,
     ProviderConfig,
@@ -35,12 +36,33 @@ from .base import (
     Usage,
     classify_status,
     extract_error_message,
+    newest_first,
 )
 
 # Servidores locais. Dentro de um container, "localhost" é o próprio container,
 # então o Docker aponta essas variáveis para host.docker.internal.
 OLLAMA_URL = os.environ.get("INTERLINEAR_OLLAMA_URL", "http://localhost:11434/v1")
 LMSTUDIO_URL = os.environ.get("INTERLINEAR_LMSTUDIO_URL", "http://localhost:1234/v1")
+
+# Modelos que não geram texto de conversa e só poluem o seletor: embeddings,
+# áudio, imagem, moderação e os antigos de completar texto.
+_NOT_TEXT = re.compile(
+    r"embed|tts|whisper|transcri|dall-e|image|moderation|realtime|audio|sora"
+    r"|\b(?:babbage|davinci)",
+    re.IGNORECASE,
+)
+
+
+def _epoch(value: Any) -> float:
+    """Data de lançamento como época: aceita número ou texto ISO 8601."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str) and value:
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return 0.0
+    return 0.0
 
 # --------------------------------------------------------------------------
 # Dialeto OpenAI
@@ -112,11 +134,15 @@ class OpenAICompatProvider(Provider):
         items = data.get("data") if isinstance(data, dict) else data
         if not isinstance(items, list):
             return []
-        return sorted(
-            str(item.get("id"))
+        return newest_first([
+            ModelInfo(
+                id=str(item["id"]),
+                name=str(item.get("name") or ""),  # OpenRouter dá o nome
+                created=_epoch(item.get("created")),
+            )
             for item in items
-            if isinstance(item, dict) and item.get("id")
-        )
+            if isinstance(item, dict) and item.get("id") and not _NOT_TEXT.search(str(item["id"]))
+        ])
 
 
 class OllamaProvider(OpenAICompatProvider):
@@ -124,15 +150,30 @@ class OllamaProvider(OpenAICompatProvider):
 
     default_base_url = OLLAMA_URL
 
-    async def list_models(self, *, client: httpx.AsyncClient) -> list[str]:
+    async def list_models(self, *, client: httpx.AsyncClient) -> list[ModelInfo]:
         root = self.base_url.removesuffix("/v1")
         response = await client.get(f"{root}/api/tags", timeout=30.0)
         if response.status_code >= 400:
             raise ProviderError(_error_text(response), status=response.status_code)
         models = response.json().get("models", [])
+        # A data aqui é a do download, não a do lançamento: a ordem fica alfabética.
         return sorted(
-            str(m.get("name")) for m in models if isinstance(m, dict) and m.get("name")
+            (
+                ModelInfo(id=str(m["name"]), note=_ollama_note(m))
+                for m in models
+                if isinstance(m, dict) and m.get("name") and not _NOT_TEXT.search(str(m["name"]))
+            ),
+            key=lambda m: m.id,
         )
+
+
+def _ollama_note(model: dict[str, Any]) -> str:
+    details = model.get("details") if isinstance(model.get("details"), dict) else {}
+    parts = [str(details.get("parameter_size") or "")]
+    size = model.get("size")
+    if isinstance(size, (int, float)) and size > 0:
+        parts.append(f"{size / 1e9:.1f} GB")
+    return " · ".join(p for p in parts if p)
 
 
 class LMStudioProvider(OpenAICompatProvider):
@@ -220,9 +261,15 @@ class AnthropicProvider(Provider):
         if response.status_code >= 400:
             raise ProviderError(_error_text(response), status=response.status_code)
         data = response.json().get("data", [])
-        return sorted(
-            str(m.get("id")) for m in data if isinstance(m, dict) and m.get("id")
-        )
+        return newest_first([
+            ModelInfo(
+                id=str(m["id"]),
+                name=str(m.get("display_name") or ""),
+                created=_epoch(m.get("created_at")),
+            )
+            for m in data
+            if isinstance(m, dict) and m.get("id")
+        ])
 
 
 # --------------------------------------------------------------------------
@@ -312,10 +359,17 @@ class GoogleProvider(Provider):
 
         models = response.json().get("models", [])
         return sorted(
-            str(m.get("name", "")).removeprefix("models/")
-            for m in models
-            if isinstance(m, dict)
-            and "generateContent" in (m.get("supportedGenerationMethods") or [])
+            (
+                ModelInfo(
+                    id=str(m.get("name", "")).removeprefix("models/"),
+                    name=str(m.get("displayName") or ""),
+                )
+                for m in models
+                if isinstance(m, dict)
+                and "generateContent" in (m.get("supportedGenerationMethods") or [])
+                and not _NOT_TEXT.search(str(m.get("name", "")))
+            ),
+            key=lambda m: m.id,
         )
 
 
@@ -325,7 +379,11 @@ class GoogleProvider(Provider):
 
 
 # Modelos aceitos pelo Claude Code como apelido do mais recente de cada linha.
-CLAUDE_CLI_MODELS = ["haiku", "sonnet", "opus"]
+CLAUDE_CLI_MODELS = [
+    ModelInfo("haiku", "Haiku", note="O mais rápido; gasta menos do limite do plano."),
+    ModelInfo("sonnet", "Sonnet", note="Equilíbrio entre qualidade e limite. O padrão."),
+    ModelInfo("opus", "Opus", note="A melhor tradução; gasta o limite bem mais rápido."),
+]
 
 _RESET_EPOCH = re.compile(r"\|\s*(\d{10})\b")
 _RESET_CLOCK = re.compile(r"resets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)", re.I)
@@ -494,7 +552,7 @@ class ClaudeCliProvider(Provider):
             ),
         )
 
-    async def list_models(self, *, client: httpx.AsyncClient) -> list[str]:
+    async def list_models(self, *, client: httpx.AsyncClient) -> list[ModelInfo]:
         return list(CLAUDE_CLI_MODELS)
 
 
@@ -504,10 +562,7 @@ def _cli_error(message: str, *, status: Any = None) -> ProviderError:
     if any(word in lowered for word in _LIMIT_WORDS):
         return PlanLimitError(f"Limite do plano: {message[:300]}", resets_at=_reset_time(message))
     if any(word in lowered for word in _LOGIN_WORDS):
-        return ProviderError(
-            "O Claude Code não está logado. Rode `claude` no terminal e entre com a sua conta.",
-            fatal=True,
-        )
+        return ProviderError(f"O Claude Code não está logado. {claude_login_hint()}", fatal=True)
     code = int(status) if isinstance(status, int) or str(status).isdigit() else None
     return ProviderError(
         f"Claude Code: {message[:300]}",
@@ -632,6 +687,8 @@ PROVIDER_CATALOG = [
         "needs_base_url": False,
         "default_base_url": "",
         "default_model": "sonnet",
+        # Poucos modelos e sempre os mesmos: a tela mostra como opções.
+        "fixed_models": True,
         "experimental": True,
         "hint": (
             "Usa o Claude Code, logado com a sua conta, e os limites do seu plano "

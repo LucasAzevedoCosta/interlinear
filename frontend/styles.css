@@ -819,6 +819,54 @@ button {
 .field__hint { font-size: 11px; color: var(--on-bench-dim); margin: 5px 0 0; line-height: 1.5; }
 .field__hint[data-experimental="true"] { color: #d9b866; }
 
+/* Seletor de modelo: lista com busca embaixo do campo. */
+.model-field { position: relative; }
+.model-picker {
+  position: absolute;
+  z-index: 5;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--bench-raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  padding: 4px 0;
+}
+.model-option {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.model-option:hover, .model-option[aria-selected="true"] { background: var(--rule); }
+.model-option__name { font-size: 13px; color: var(--on-bench); }
+.model-option__meta { font-size: 11px; color: var(--on-bench-dim); }
+.model-option__meta:empty { display: none; }
+.model-picker__note { font-size: 11px; color: var(--on-bench-dim); margin: 0; padding: 6px 10px; }
+
+/* Poucos modelos fixos: opções lado a lado, com o que cada um faz. */
+.model-choices { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.model-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  padding: 8px 10px;
+  background: var(--bench-deep);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.model-choice strong { font-size: 13px; font-weight: 600; color: var(--on-bench); }
+.model-choice span { font-size: 11px; line-height: 1.4; color: var(--on-bench-dim); }
+.model-choice:hover { border-color: var(--on-bench-dim); }
+.model-choice[aria-checked="true"] { border-color: var(--pencil); box-shadow: inset 0 0 0 1px var(--pencil); }
+@media (max-width: 480px) { .model-choices { grid-template-columns: 1fr; } }
+
 /* Claude pela assinatura: como entrar, e se já entrou. */
 .connect {
   border: 1px solid var(--rule);

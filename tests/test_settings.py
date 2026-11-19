@@ -121,3 +121,35 @@ def test_apagar_o_provedor_ativo_escolhe_outro(client):
 
     settings = client.delete(f"/api/providers/{first}").json()["settings"]
     assert settings["active_provider_id"] == second
+
+
+@pytest.fixture
+def listed_keys(monkeypatch):
+    """Troca a listagem da OpenAI por uma que só anota a chave recebida."""
+    from app.ai import providers
+    from app.ai.base import ModelInfo
+
+    keys: list[str] = []
+
+    async def fake_list(self, *, client):
+        keys.append(self.config.api_key)
+        return [ModelInfo("gpt-x")]
+
+    monkeypatch.setattr(providers.OpenAICompatProvider, "list_models", fake_list)
+    return keys
+
+
+def test_lista_modelos_antes_de_salvar(client, listed_keys):
+    response = client.post("/api/providers/models", json={"kind": "openai", "api_key": "sk-nova"})
+    assert response.json()["models"][0]["id"] == "gpt-x"
+    assert listed_keys == ["sk-nova"]
+
+
+def test_lista_modelos_com_a_chave_guardada_ao_editar(client, listed_keys):
+    provider_id = _add_provider(client)["provider"]["id"]
+
+    client.post("/api/providers/models", json={"kind": "openai", "provider_id": provider_id})
+    # Trocar o serviço no formulário não leva a chave guardada para o outro.
+    client.post("/api/providers/models", json={"kind": "openai_compat", "provider_id": provider_id,
+                                               "base_url": "http://x/v1"})
+    assert listed_keys == ["sk-secreta-1234", ""]
