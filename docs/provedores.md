@@ -37,6 +37,24 @@ Antes do primeiro lote de cada tradução, o Interlinear confere com
 `claude auth status` que a CLI está logada **com a conta Claude** (e não com
 uma chave de API). "Testar conexão" mostra o plano.
 
+### Entrar na conta
+
+Fora do Docker, o painel "Conectar" tem o botão **Entrar com a conta Claude**.
+Ele não faz o login: abre uma **janela de terminal desta máquina** rodando o
+`claude auth login` oficial — como um atalho na área de trabalho. O Claude Code
+abre a página da Anthropic no navegador, você autoriza, e o painel avisa
+sozinho quando a conta entrar. O link e o código ficam entre o Claude Code e a
+Anthropic; o Interlinear não recebe nada disso do navegador.
+
+Dá no mesmo rodar `./run.sh login` (ou `.\run.ps1 login` no Windows).
+
+Dentro do Docker o botão não aparece: o container não alcança a sua área de
+trabalho, então lá o caminho é a aba Exec (abaixo).
+
+O painel mostra o estado em uma linha — conectado e em que plano, ou o que
+falta — e a lista de provedores repete isso numa bolinha ao lado do modelo,
+para dar para ver sem abrir o formulário.
+
 ### Com Docker
 
 1. No arquivo `.env` ao lado do `compose.yaml`, ponha
@@ -57,20 +75,25 @@ O login fica no volume `interlinear-claude` (pasta `/claude`, via
 login junto com os dados. O Claude Code não se atualiza sozinho dentro do
 container: reconstruir a imagem traz a versão nova.
 
-**Por que o login não é feito pela página do Interlinear?** Porque aí o
+**Por que o login não é feito dentro da página do Interlinear?** Porque aí o
 Interlinear teria de repassar o link e o código de autorização, e a Anthropic
 proíbe que terceiros ofereçam o login do Claude.ai ou intermediem credenciais.
-O login acontece só no Claude Code, pelo fluxo da Anthropic; a página apenas
-mostra o caminho e lê o `claude auth status` (logado, plano, validade), nunca
-o token.
+O login acontece só no Claude Code, pelo fluxo da Anthropic; a página dá a
+partida no binário oficial (o botão **Entrar com a conta Claude**, fora do
+Docker) e lê o `claude auth status` (logado, plano, validade), nunca o token.
+Dar a partida num programa é diferente de intermediar o que ele recebe: o
+código de autorização é digitado na janela do terminal, que é sua, e o
+Interlinear não tem como vê-lo.
 
 ### Sem Docker
 
-1. [Claude Code](https://claude.com/claude-code) instalado. Rode
-   `claude auth login` no terminal e entre com a sua conta Claude.
+1. [Claude Code](https://claude.com/claude-code) instalado.
 2. O Interlinear rodando direto na máquina, com Python 3.11 ou mais novo
    (veja "Instalação" no README).
-3. Se o `claude` não estiver no `PATH`, aponte `INTERLINEAR_CLAUDE` para ele.
+3. Em **Configurações → Adicionar provedor**, escolha "Claude pela
+   assinatura" e clique em **Entrar com a conta Claude**. Nada de terminal:
+   o botão abre a janela e o navegador por você.
+4. Se o `claude` não estiver no `PATH`, aponte `INTERLINEAR_CLAUDE` para ele.
 
 ### Cadastro
 

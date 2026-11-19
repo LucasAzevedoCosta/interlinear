@@ -95,8 +95,9 @@ seguintes reaproveitam o que já foi baixado. A porta é publicada só em
 - **Claude pela assinatura (experimental):** ponha
   `INTERLINEAR_WITH_CLAUDE=1` no `.env` e reconstrua; a imagem passa a trazer
   o Claude Code (~350 MB a mais). Em Configurações, o provedor mostra como
-  entrar com a sua conta, uma vez só. O login fica no volume
-  `interlinear-claude` ([docs/provedores.md](docs/provedores.md)).
+  entrar com a sua conta, uma vez só — no Docker, pela aba Exec do container
+  (sem Docker é um clique). O login fica no volume `interlinear-claude`
+  ([docs/provedores.md](docs/provedores.md)).
 - **Logs:** `docker compose logs -f`
 - **Parar:** `docker compose down`
 - **Atualizar:** `git pull` e `docker compose up -d --build` de novo.
@@ -128,6 +129,11 @@ Se o PowerShell recusar o script, rode uma vez
 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
 Abra `http://127.0.0.1:8000`. Para parar, `Ctrl+C` no terminal.
+
+Quem traduz pela assinatura do Claude pode entrar na conta pelo botão em
+**Configurações**, ou por `./run.sh login` (no Windows, `.\run.ps1 login`).
+Os dois chamam o login do próprio Claude Code
+([docs/provedores.md](docs/provedores.md)).
 
 #### Sem os scripts
 

@@ -11,7 +11,12 @@ import httpx
 from fastapi import APIRouter, Body, HTTPException
 
 from ..ai.base import Message, ProviderConfig, ProviderError
-from ..ai.providers import PROVIDER_CATALOG, build_provider, claude_status
+from ..ai.providers import (
+    PROVIDER_CATALOG,
+    build_provider,
+    claude_login_terminal,
+    claude_status,
+)
 from ..ai.translator import Progress, TranslationSettings, Translator
 from ..config import ProviderProfile, Settings
 from ..core.blocks import TRANSLATABLE, Block, Document
@@ -144,6 +149,24 @@ async def delete_provider(provider_id: str) -> dict[str, Any]:
 async def get_claude_status() -> dict[str, Any]:
     """Se o Claude Code está instalado e logado com a assinatura, e em que plano."""
     return {"claude": await claude_status()}
+
+
+@router.post("/claude/login")
+async def open_claude_login() -> dict[str, Any]:
+    """Abre o login do Claude Code numa janela de terminal desta máquina.
+
+    O Interlinear não faz o login nem toca no código de autorização: ele só
+    dá a partida no binário oficial numa janela do usuário, e depois lê o
+    `claude auth status` como já fazia. Não recebe nada do navegador.
+
+    É POST porque muda algo na máquina (abre uma janela), e assim o
+    middleware `local_only` confere o Origin do pedido.
+    """
+    try:
+        login = await claude_login_terminal()
+    except ProviderError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"login": login, "claude": await claude_status()}
 
 
 @router.post("/providers/{provider_id}/test")

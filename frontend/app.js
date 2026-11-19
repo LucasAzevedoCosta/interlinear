@@ -27,6 +27,10 @@ const state = {
   models: [],
   pickerIndex: -1,
   claudeTimer: null,
+  // Último `claude auth status` lido, com a hora ({at, value}).
+  claude: null,
+  // Entre abrir a janela de login e a conta aparecer.
+  claudeWaiting: false,
   jobId: null,
   jobTimer: null,
   // "convert" ou "translate": a etapa aberta (ver setStage).
@@ -1532,6 +1536,17 @@ function renderSettings() {
       `<div class="provider-card__meta">${escapeHtml(provider.model || 'sem modelo')}` +
       `${provider.key_hint ? ` · chave ${escapeHtml(provider.key_hint)}` : ''}</div>`;
 
+    // Quem traduz pela assinatura não tem chave para mostrar: mostra se o
+    // Claude Code está conectado, que é o que decide se a tradução vai rodar.
+    if (provider.kind === 'claude_cli') {
+      const badge = document.createElement('span');
+      badge.className = 'dot-badge';
+      badge.dataset.tone = 'wait';
+      badge.dataset.claudeBadge = '';
+      badge.textContent = 'verificando…';
+      body.querySelector('.provider-card__meta').append(' · ', badge);
+    }
+
     const use = document.createElement('button');
     use.className = 'btn btn--quiet';
     use.textContent = provider.id === settings.active_provider_id ? 'Em uso' : 'Usar';
@@ -1561,6 +1576,8 @@ function renderSettings() {
     card.append(body, use, edit, remove);
     list.append(card);
   }
+
+  paintClaudeBadges();
 }
 
 function applyCatalogDefaults() {
@@ -1580,12 +1597,15 @@ function applyCatalogDefaults() {
   refreshModels();
 }
 
-/* Claude pela assinatura. O login é feito no próprio Claude Code, pelo fluxo
-   da Anthropic: o Interlinear não pode intermediar o link nem o código. A
-   página mostra o caminho e confere sozinha, a cada poucos segundos, até
-   ver a conta entrar. */
+/* Claude pela assinatura. O login é do Claude Code, pelo fluxo da Anthropic:
+   o Interlinear não pode intermediar o link nem o código, e nunca vê o token.
+   O que ele faz é dar a partida: "Entrar com a conta Claude" abre uma janela
+   de terminal desta máquina rodando o binário oficial, e daí em diante a
+   página só lê o `claude auth status` até a conta aparecer. Dentro do Docker
+   não há janela para abrir, e aí o caminho continua sendo a aba Exec. */
 
 const CLAUDE_LOGIN = 'claude auth login';
+const CLAUDE_LOGIN_LABEL = 'Entrar com a conta Claude';
 
 function updateClaudePanel() {
   const show = $('pKind').value === 'claude_cli';
@@ -1594,28 +1614,47 @@ function updateClaudePanel() {
   else stopClaudePolling();
 }
 
+// Cada `claude auth status` roda um processo. O painel e a lista de provedores
+// perguntam juntos, então o resultado vale por alguns segundos.
+async function claudeStatus(fresh = false) {
+  if (!fresh && state.claude && Date.now() - state.claude.at < 5000) {
+    return state.claude.value;
+  }
+  let value;
+  try {
+    ({ claude: value } = await api('/api/claude/status'));
+  } catch (error) {
+    value = { installed: true, error: error.message };
+  }
+  state.claude = { at: Date.now(), value };
+  return value;
+}
+
 function stopClaudePolling() {
   clearInterval(state.claudeTimer);
   state.claudeTimer = null;
 }
 
+function startClaudePolling() {
+  if (state.claudeTimer) return;
+  state.claudeTimer = setInterval(() => {
+    if ($('settingsSheet').hidden || $('claudeConnect').hidden) stopClaudePolling();
+    else checkClaude();
+  }, 3000);
+}
+
 async function checkClaude() {
-  let claude;
-  try {
-    ({ claude } = await api('/api/claude/status'));
-  } catch (error) {
-    claude = { installed: true, error: error.message };
-  }
+  const claude = await claudeStatus(true);
   renderClaudePanel(claude);
 
   if (claude.logged_in && claude.subscription) {
+    // Só avisa se a página estava esperando: no primeiro desenho, não.
     if (state.claudeTimer) toast(`Claude conectado${planText(claude.plan)}.`);
+    state.claudeWaiting = false;
     stopClaudePolling();
-  } else if (claude.installed && !state.claudeTimer) {
-    state.claudeTimer = setInterval(() => {
-      if ($('settingsSheet').hidden || $('claudeConnect').hidden) stopClaudePolling();
-      else checkClaude();
-    }, 3000);
+    paintClaudeBadges();
+  } else if (claude.installed) {
+    startClaudePolling();
   }
 }
 
@@ -1630,6 +1669,30 @@ function loginExpiry(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+// "Conectado ou não" para a bolinha da lista de provedores. Curto de
+// propósito: fica na mesma linha do modelo, e o painel logo abaixo é que
+// conta o resto (plano, validade, o que fazer).
+function claudeLabel(claude) {
+  if (!claude) return { tone: 'wait', text: 'verificando…' };
+  if (claude.logged_in && claude.subscription) return { tone: 'ok', text: 'conectado' };
+  if (!claude.installed) return { tone: 'todo', text: 'sem o Claude Code' };
+  if (claude.error) return { tone: 'todo', text: 'não deu para verificar' };
+  if (claude.logged_in) return { tone: 'todo', text: 'usando chave de API' };
+  return { tone: 'todo', text: 'não conectado' };
+}
+
+// As bolinhas da lista de provedores. A lista é redesenhada do zero a cada
+// mudança nas configurações, então cada desenho repinta as suas.
+async function paintClaudeBadges() {
+  const slots = document.querySelectorAll('[data-claude-badge]');
+  if (!slots.length) return;
+  const label = claudeLabel(await claudeStatus());
+  for (const slot of slots) {
+    slot.dataset.tone = label.tone;
+    slot.textContent = label.text;
+  }
+}
+
 function renderClaudePanel(claude) {
   const box = $('claudeConnect');
   box.innerHTML = '';
@@ -1640,10 +1703,20 @@ function renderClaudePanel(claude) {
     box.append(p);
     return p;
   };
+  // A bolinha é um elemento, não um ✓ no CSS: ela também pisca enquanto
+  // esperamos o login terminar.
+  const status = (text) => {
+    const p = document.createElement('p');
+    p.className = 'connect__status';
+    const dot = document.createElement('span');
+    dot.className = 'connect__dot';
+    p.append(dot, text);
+    box.append(p);
+  };
 
   if (claude.logged_in && claude.subscription) {
     box.dataset.state = 'ok';
-    line(`Conectado ao Claude${planText(claude.plan)}.`, 'connect__status');
+    status(`Conectado ao Claude${planText(claude.plan)}.`);
     const expires = loginExpiry(claude.expires_at);
     if (expires) {
       const soon = expires - Date.now() < 7 * 24 * 3600 * 1000;
@@ -1657,11 +1730,10 @@ function renderClaudePanel(claude) {
 
   box.dataset.state = 'todo';
   if (!claude.installed) {
-    line(
+    status(
       claude.docker
         ? 'Esta imagem do Interlinear foi construída sem o Claude Code.'
-        : 'O Claude Code não está instalado nesta máquina.',
-      'connect__status'
+        : 'O Claude Code não está instalado nesta máquina.'
     );
     line(
       claude.docker
@@ -1672,18 +1744,86 @@ function renderClaudePanel(claude) {
     return;
   }
   if (claude.error) {
-    line(claude.error, 'connect__status');
+    status('Não foi possível falar com o Claude Code.');
+    line(claude.error);
     return;
   }
 
-  const command = claude.logged_in ? `claude auth logout && ${CLAUDE_LOGIN}` : CLAUDE_LOGIN;
-  line(
-    claude.logged_in
-      ? 'O Claude Code entrou com uma chave de API, não com a assinatura. Saia e entre com a conta Claude:'
-      : 'Falta entrar com a sua conta Claude. É uma vez só:',
-    'connect__status'
-  );
+  // Logado, mas por chave de API: dá para entrar, só precisa sair antes — e
+  // quem faz isso é o próprio script que a janela roda.
+  const apiKey = Boolean(claude.logged_in);
 
+  if (state.claudeWaiting) {
+    box.dataset.state = 'busy';
+    status('Esperando você entrar na janela do terminal…');
+    line(
+      'Autorize na página da Anthropic que o Claude Code abriu. Esta tela avisa ' +
+        'sozinha quando a conta entrar.'
+    );
+  } else {
+    status(
+      apiKey
+        ? 'O Claude Code está usando uma chave de API, não a assinatura.'
+        : 'Falta entrar com a sua conta Claude.'
+    );
+    line(
+      apiKey
+        ? 'Para usar a chave, cadastre o provedor Anthropic. Para usar a assinatura, ' +
+            'entre com a conta Claude.'
+        : 'É uma vez só, e vale para todos os livros.'
+    );
+  }
+
+  if (claude.can_open_terminal) {
+    if (!state.claudeWaiting) {
+      box.append(claudeLoginButton());
+      line(
+        'Abre uma janela de terminal nesta máquina e a página da Anthropic no ' +
+          'navegador. O código de autorização fica entre o Claude Code e a Anthropic: ' +
+          'o Interlinear não vê o seu login.'
+      );
+    }
+    const details = document.createElement('details');
+    details.className = 'connect__fallback';
+    const summary = document.createElement('summary');
+    summary.textContent = 'Prefiro fazer pelo terminal';
+    details.append(summary, claudeSteps(claude));
+    box.append(details);
+    return;
+  }
+
+  box.append(claudeSteps(claude));
+  if (claude.docker) line(`Ou, num terminal: docker exec -it interlinear ${CLAUDE_LOGIN}`);
+  line('Esta página confere sozinha e avisa quando você entrar.', 'field__hint connect__waiting');
+}
+
+function claudeLoginButton() {
+  const button = document.createElement('button');
+  button.className = 'btn btn--primary connect__login';
+  button.textContent = CLAUDE_LOGIN_LABEL;
+  button.onclick = async () => {
+    button.disabled = true;
+    button.textContent = 'Abrindo…';
+    try {
+      const { claude } = await api('/api/claude/login', { method: 'POST' });
+      state.claudeWaiting = true;
+      state.claude = { at: Date.now(), value: claude };
+      toast('Abri uma janela de terminal. Autorize na página da Anthropic.');
+      renderClaudePanel(claude);
+      startClaudePolling();
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = CLAUDE_LOGIN_LABEL;
+      toast(error.message, 'error');
+    }
+  };
+  return button;
+}
+
+// O caminho manual, que continua valendo: no Docker é o único, e fora dele
+// fica guardado atrás de "Prefiro fazer pelo terminal".
+function claudeSteps(claude) {
+  const command = claude.logged_in ? `claude auth logout && ${CLAUDE_LOGIN}` : CLAUDE_LOGIN;
   const steps = document.createElement('ol');
   steps.className = 'connect__steps';
   const step = (...nodes) => {
@@ -1691,6 +1831,7 @@ function renderClaudePanel(claude) {
     li.append(...nodes);
     steps.append(li);
   };
+
   if (claude.docker) step('No Docker Desktop, abra Containers → interlinear → aba Exec.');
   const code = document.createElement('code');
   code.textContent = command;
@@ -1710,10 +1851,7 @@ function renderClaudePanel(claude) {
     'Escolha a conta Claude, autorize na página da Anthropic e cole o código que ela ' +
       `mostrar de volta no ${claude.docker ? 'Exec' : 'terminal'}.`
   );
-  box.append(steps);
-
-  if (claude.docker) line(`Ou, num terminal: docker exec -it interlinear ${CLAUDE_LOGIN}`);
-  line('Esta página confere sozinha e avisa quando você entrar.', 'field__hint connect__waiting');
+  return steps;
 }
 
 function fillProviderForm(provider) {
