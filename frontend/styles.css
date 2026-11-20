@@ -819,8 +819,34 @@ button {
 .field__hint { font-size: 11px; color: var(--on-bench-dim); margin: 5px 0 0; line-height: 1.5; }
 .field__hint[data-experimental="true"] { color: #d9b866; }
 
-/* Seletor de modelo: lista com busca embaixo do campo. */
+/* Seletor de modelo: campo de escrever com lista embaixo, e uma seta que
+   abre a lista como num select. Escrever continua valendo: há serviços que
+   aceitam modelos que não listam. */
 .model-field { position: relative; }
+
+.model-input { position: relative; display: flex; }
+.model-input > input[type="text"] { padding-right: 30px; }
+.model-input__caret {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  width: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0 2px;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--on-bench-dim);
+  background: var(--bench-raised);
+  border: none;
+  border-left: 1px solid var(--rule);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  cursor: pointer;
+}
+.model-input__caret:hover { color: var(--on-bench); background: var(--bench-raised); }
+.model-field[data-open="true"] .model-input__caret { color: var(--on-bench); }
 .model-picker {
   position: absolute;
   z-index: 5;
@@ -902,6 +928,21 @@ button {
 @keyframes breathe { 50% { opacity: 0.25; } }
 @media (prefers-reduced-motion: reduce) {
   .connect[data-state="busy"] .connect__dot { animation: none; }
+}
+/* O aviso de que, no Docker, o login é feito pelo container. */
+.connect__notice {
+  font-size: 12px;
+  color: var(--on-bench);
+  margin: 10px 0 0;
+  line-height: 1.5;
+}
+/* Monitoração: de quando é o que está na tela. */
+.connect__stamp {
+  font-size: 10.5px;
+  color: var(--on-bench-dim);
+  margin: 10px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--rule-soft);
 }
 .connect__login { margin-top: 10px; }
 .connect__fallback { margin-top: 10px; }
@@ -991,6 +1032,76 @@ button {
 .row { display: flex; gap: 10px; }
 .row > * { flex: 1; }
 .row--start > * { flex: 0 0 auto; }
+
+/* ------------------------------------------- página de configurações */
+
+/* Cobre o app inteiro: configurar é uma tarefa, não um aparte. A barra
+   própria mantém o caminho de volta sempre visível enquanto rola. */
+.settings {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--bench);
+  overflow-y: auto;
+}
+
+.settings__bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 48px;
+  padding: 0 14px;
+  background: var(--bench-deep);
+  border-bottom: 1px solid var(--rule);
+}
+
+.settings__crumb { flex: 1; font-size: 12px; color: var(--on-bench-dim); }
+
+.settings__inner {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 26px 22px 90px;
+}
+
+.settings__block { margin-bottom: 36px; }
+
+.settings__block > h2,
+.settings__block-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--rule-soft);
+  font-family: var(--text);
+  font-size: 17px;
+  font-weight: 400;
+}
+
+.settings__block-head > h2 {
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  border: none;
+  font: inherit;
+}
+
+.settings__sub {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 24px 0 12px;
+}
+
+.settings__block > .field__hint:first-of-type { margin: -4px 0 14px; }
+
+@media (max-width: 560px) {
+  .settings__inner { padding: 18px 14px 70px; }
+  .settings__crumb { display: none; }
+}
 
 .section-rule {
   border: none;

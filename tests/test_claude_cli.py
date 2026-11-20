@@ -403,3 +403,13 @@ def test_sem_terminal_para_abrir_ensina_o_comando(cli, api, monkeypatch):
 
     assert response.status_code == 400
     assert "claude auth login" in response.json()["detail"]
+
+
+def test_perfil_da_assinatura_nao_guarda_chave(api):
+    created = api.post(
+        "/api/providers",
+        json={"kind": "claude_cli", "label": "Claude", "model": "sonnet", "api_key": "sk-nao"},
+    ).json()["provider"]
+
+    assert created["has_key"] is False
+    assert not created["key_hint"]

@@ -25,6 +25,10 @@ const state = {
   providerHasKey: false,
   // Modelos do serviço escolhido no formulário de provedor.
   models: [],
+  modelsLoading: false,
+  modelsError: '',
+  // A rota de configurações foi aberta por nós (dá para voltar com history).
+  pushedSettings: false,
   pickerIndex: -1,
   claudeTimer: null,
   // Último `claude auth status` lido, com a hora ({at, value}).
@@ -81,6 +85,38 @@ function toast(message, tone = 'info', action = null) {
   clearTimeout(toast._timer);
   const delay = tone === 'error' ? 7000 : action ? 8000 : 3200;
   toast._timer = setTimeout(() => { element.hidden = true; }, delay);
+}
+
+/* ----------------------------------------------------------------- rotas */
+
+/* As configurações são uma página, não uma gaveta: têm endereço próprio, o
+   botão Voltar do navegador funciona, e dá para deixar aberta numa aba. */
+
+const SETTINGS_ROUTE = '#/configuracoes';
+
+function openSettings() {
+  if (location.hash === SETTINGS_ROUTE) return applyRoute();
+  state.pushedSettings = true;
+  location.hash = SETTINGS_ROUTE;
+}
+
+function closeSettings() {
+  if (state.pushedSettings) return history.back();
+  history.replaceState(null, '', location.pathname + location.search);
+  applyRoute();
+}
+
+function applyRoute() {
+  const open = location.hash === SETTINGS_ROUTE;
+  $('settingsPage').hidden = !open;
+  if (open) {
+    $('settingsPage').scrollTop = 0;
+    loadSettings();
+    checkClaude();
+  } else {
+    state.pushedSettings = false;
+    stopClaudePolling();
+  }
 }
 
 /* --------------------------------------------------------------- projetos */
@@ -1587,13 +1623,13 @@ function applyCatalogDefaults() {
   $('pHint').textContent = entry.hint;
   $('pHint').dataset.experimental = Boolean(entry.experimental);
   $('keyField').style.display = entry.needs_key ? '' : 'none';
+  if (!entry.needs_key) $('pKey').value = '';
   // Claude pela assinatura: não há endereço nem chave, só o modelo.
   $('baseField').hidden = entry.needs_base_url === false;
   if (entry.default_model && !$('pModel').value) $('pModel').value = entry.default_model;
   if (!$('pLabel').value || state.editingProviderId === null) {
     $('pLabel').value = entry.label;
   }
-  updateClaudePanel();
   refreshModels();
 }
 
@@ -1606,13 +1642,6 @@ function applyCatalogDefaults() {
 
 const CLAUDE_LOGIN = 'claude auth login';
 const CLAUDE_LOGIN_LABEL = 'Entrar com a conta Claude';
-
-function updateClaudePanel() {
-  const show = $('pKind').value === 'claude_cli';
-  $('claudeConnect').hidden = !show;
-  if (show) checkClaude();
-  else stopClaudePolling();
-}
 
 // Cada `claude auth status` roda um processo. O painel e a lista de provedores
 // perguntam juntos, então o resultado vale por alguns segundos.
@@ -1638,7 +1667,7 @@ function stopClaudePolling() {
 function startClaudePolling() {
   if (state.claudeTimer) return;
   state.claudeTimer = setInterval(() => {
-    if ($('settingsSheet').hidden || $('claudeConnect').hidden) stopClaudePolling();
+    if ($('settingsPage').hidden) stopClaudePolling();
     else checkClaude();
   }, 3000);
 }
@@ -1714,87 +1743,111 @@ function renderClaudePanel(claude) {
     box.append(p);
   };
 
-  if (claude.logged_in && claude.subscription) {
-    box.dataset.state = 'ok';
-    status(`Conectado ao Claude${planText(claude.plan)}.`);
-    const expires = loginExpiry(claude.expires_at);
-    if (expires) {
-      const soon = expires - Date.now() < 7 * 24 * 3600 * 1000;
+  // Corpo à parte para o rodapé valer em todos os caminhos.
+  const body = () => {
+    if (claude.logged_in && claude.subscription) {
+      box.dataset.state = 'ok';
+      status(`Conectado ao Claude${planText(claude.plan)}.`);
+      const expires = loginExpiry(claude.expires_at);
+      if (expires) {
+        const soon = expires - Date.now() < 7 * 24 * 3600 * 1000;
+        line(
+          `O login vale até ${expires.toLocaleDateString('pt-BR')}` +
+            (soon ? '. Expira em breve: entre de novo do mesmo jeito para renovar.' : '.')
+        );
+      }
+      if (claude.docker) {
+        line(
+          'O login fica no volume interlinear-claude e sobrevive a rebuilds. ' +
+            'Só o docker compose down -v apaga.'
+        );
+      }
+      return;
+    }
+
+    box.dataset.state = 'todo';
+    if (!claude.installed) {
+      status(
+        claude.docker
+          ? 'Esta imagem do Interlinear foi construída sem o Claude Code.'
+          : 'O Claude Code não está instalado nesta máquina.'
+      );
       line(
-        `O login vale até ${expires.toLocaleDateString('pt-BR')}` +
-          (soon ? '. Expira em breve: entre de novo do mesmo jeito para renovar.' : '.')
+        claude.docker
+          ? 'Ponha INTERLINEAR_WITH_CLAUDE=1 no arquivo .env ao lado do compose.yaml e ' +
+              'reconstrua: docker compose up -d --build.'
+          : 'Instale pelo site claude.com/claude-code e volte aqui.'
+      );
+      return;
+    }
+    if (claude.error) {
+      status('Não foi possível falar com o Claude Code.');
+      line(claude.error);
+      return;
+    }
+
+    // Logado, mas por chave de API: dá para entrar, só precisa sair antes — e
+    // quem faz isso é o próprio script que a janela roda.
+    const apiKey = Boolean(claude.logged_in);
+
+    if (state.claudeWaiting) {
+      box.dataset.state = 'busy';
+      status('Esperando você entrar na janela do terminal…');
+      line(
+        'Autorize na página da Anthropic que o Claude Code abriu. Esta tela avisa ' +
+          'sozinha quando a conta entrar.'
+      );
+    } else {
+      status(
+        apiKey
+          ? 'O Claude Code está usando uma chave de API, não a assinatura.'
+          : 'Não conectado: falta entrar com a sua conta Claude.'
+      );
+      line(
+        apiKey
+          ? 'Para usar a chave, cadastre o provedor Anthropic. Para usar a assinatura, ' +
+              'entre com a conta Claude.'
+          : 'É uma vez só, e vale para todos os livros.'
       );
     }
-    return;
-  }
 
-  box.dataset.state = 'todo';
-  if (!claude.installed) {
-    status(
-      claude.docker
-        ? 'Esta imagem do Interlinear foi construída sem o Claude Code.'
-        : 'O Claude Code não está instalado nesta máquina.'
-    );
-    line(
-      claude.docker
-        ? 'Ponha INTERLINEAR_WITH_CLAUDE=1 no arquivo .env ao lado do compose.yaml e ' +
-            'reconstrua: docker compose up -d --build.'
-        : 'Instale pelo site claude.com/claude-code e volte aqui.'
-    );
-    return;
-  }
-  if (claude.error) {
-    status('Não foi possível falar com o Claude Code.');
-    line(claude.error);
-    return;
-  }
+    // Fora do Docker dá para abrir a janela daqui; dentro, não existe janela
+    // para abrir, e o login é feito pelo container.
+    if (claude.can_open_terminal) {
+      if (!state.claudeWaiting) {
+        box.append(claudeLoginButton());
+        line(
+          'Abre uma janela de terminal nesta máquina e a página da Anthropic no ' +
+            'navegador. O código de autorização fica entre o Claude Code e a Anthropic: ' +
+            'o Interlinear não vê o seu login.'
+        );
+      }
+      const details = document.createElement('details');
+      details.className = 'connect__fallback';
+      const summary = document.createElement('summary');
+      summary.textContent = 'Prefiro fazer pelo terminal';
+      details.append(summary, claudeSteps(claude));
+      box.append(details);
+      return;
+    }
 
-  // Logado, mas por chave de API: dá para entrar, só precisa sair antes — e
-  // quem faz isso é o próprio script que a janela roda.
-  const apiKey = Boolean(claude.logged_in);
-
-  if (state.claudeWaiting) {
-    box.dataset.state = 'busy';
-    status('Esperando você entrar na janela do terminal…');
-    line(
-      'Autorize na página da Anthropic que o Claude Code abriu. Esta tela avisa ' +
-        'sozinha quando a conta entrar.'
-    );
-  } else {
-    status(
-      apiKey
-        ? 'O Claude Code está usando uma chave de API, não a assinatura.'
-        : 'Falta entrar com a sua conta Claude.'
-    );
-    line(
-      apiKey
-        ? 'Para usar a chave, cadastre o provedor Anthropic. Para usar a assinatura, ' +
-            'entre com a conta Claude.'
-        : 'É uma vez só, e vale para todos os livros.'
-    );
-  }
-
-  if (claude.can_open_terminal) {
-    if (!state.claudeWaiting) {
-      box.append(claudeLoginButton());
+    if (claude.docker) {
       line(
-        'Abre uma janela de terminal nesta máquina e a página da Anthropic no ' +
-          'navegador. O código de autorização fica entre o Claude Code e a Anthropic: ' +
-          'o Interlinear não vê o seu login.'
+        'O Interlinear está rodando dentro do Docker, e de lá não dá para abrir uma ' +
+          'janela na sua área de trabalho. O login é feito pelo container, uma vez só:',
+        'connect__notice'
       );
     }
-    const details = document.createElement('details');
-    details.className = 'connect__fallback';
-    const summary = document.createElement('summary');
-    summary.textContent = 'Prefiro fazer pelo terminal';
-    details.append(summary, claudeSteps(claude));
-    box.append(details);
-    return;
-  }
+    box.append(claudeSteps(claude));
+    if (claude.docker) line(`Ou, num terminal: docker exec -it interlinear ${CLAUDE_LOGIN}`);
+    line('Esta página confere sozinha e avisa quando você entrar.', 'field__hint connect__waiting');
+  };
 
-  box.append(claudeSteps(claude));
-  if (claude.docker) line(`Ou, num terminal: docker exec -it interlinear ${CLAUDE_LOGIN}`);
-  line('Esta página confere sozinha e avisa quando você entrar.', 'field__hint connect__waiting');
+  body();
+
+  // Rodapé de monitoração: de quando é o que está na tela.
+  const read = new Date(state.claude ? state.claude.at : Date.now());
+  line(`Lido do Claude Code às ${read.toLocaleTimeString('pt-BR')}.`, 'connect__stamp');
 }
 
 function claudeLoginButton() {
@@ -1867,7 +1920,6 @@ function fillProviderForm(provider) {
   $('baseField').hidden = entry?.needs_base_url === false;
   $('pHint').textContent = entry?.hint || '';
   $('pHint').dataset.experimental = Boolean(entry?.experimental);
-  updateClaudePanel();
   state.providerHasKey = provider.has_key;
   refreshModels();
 }
@@ -1942,7 +1994,13 @@ async function loadModels({ quiet = false } = {}) {
   const entry = currentEntry();
   if (!entry) return;
   const kind = entry.kind;
+  // Se a lista está aberta esperando, ela precisa voltar depois da busca:
+  // renderModelField() fecha, e era isso que a fazia piscar e sumir.
+  const wasOpen = !$('modelPicker').hidden;
+  state.modelsLoading = true;
+  state.modelsError = '';
   $('modelHint').textContent = 'Buscando os modelos…';
+  if (wasOpen) renderModelPicker();
   try {
     const data = await api('/api/providers/models', {
       method: 'POST',
@@ -1955,18 +2013,28 @@ async function loadModels({ quiet = false } = {}) {
       }),
     });
     if ($('pKind').value !== kind) return; // trocou de serviço no meio
+    state.modelsLoading = false;
     state.models = data.models;
     renderModelField();
-    if (!quiet && !entry.fixed_models) {
-      $('pModel').focus();
+    // Reabre só se o campo ainda está com o usuário: ele pode ter clicado
+    // fora enquanto a busca corria.
+    const reopen = wasOpen && document.activeElement === $('pModel');
+    if (!entry.fixed_models && (!quiet || reopen)) {
+      if (!quiet) $('pModel').focus();
       openModelPicker();
     }
   } catch (error) {
     if ($('pKind').value !== kind) return;
+    state.modelsLoading = false;
     state.models = [];
+    state.modelsError = error.message;
     renderModelField();
     $('modelHint').textContent = `Não foi possível listar os modelos: ${error.message}`;
     if (!quiet) toast(error.message, 'error');
+    // Com a lista aberta, o motivo aparece nela em vez de ela sumir.
+    if (!entry.fixed_models && wasOpen) renderModelPicker();
+  } finally {
+    state.modelsLoading = false;
   }
 }
 
@@ -2038,15 +2106,31 @@ function modelMatches() {
 }
 
 function openModelPicker() {
-  if (!state.models.length || currentEntry()?.fixed_models) return;
+  if (currentEntry()?.fixed_models) return;
   state.pickerIndex = -1;
+  // Abre primeiro, busca depois: assim a lista já aparece dizendo "Buscando
+  // os modelos…", e a busca sabe que tem uma lista aberta para repintar.
+  // Antes a seta não fazia nada enquanto não houvesse modelos — e parecia
+  // quebrada justamente quando era mais necessária.
   renderModelPicker();
+  if (!state.models.length && !state.modelsLoading) loadModels({ quiet: true });
 }
 
 function closeModelPicker() {
   $('modelPicker').hidden = true;
+  $('modelRow').dataset.open = 'false';
   $('pModel').setAttribute('aria-expanded', 'false');
   $('pModel').removeAttribute('aria-activedescendant');
+}
+
+// Por que a lista está vazia: é o que a lista mostra no lugar dos modelos.
+function modelsEmptyNote() {
+  if (state.modelsLoading) return 'Buscando os modelos…';
+  if (state.modelsError) return `Não foi possível listar: ${state.modelsError}`;
+  const entry = currentEntry();
+  const hasKey = $('pKey').value.trim() || (state.editingProviderId && state.providerHasKey);
+  if (entry?.needs_key && !hasKey) return 'Digite a chave de API para listar os modelos.';
+  return 'Nenhum modelo para listar. Dá para digitar o nome, se o serviço aceitar.';
 }
 
 function renderModelPicker() {
@@ -2082,12 +2166,14 @@ function renderModelPicker() {
     p.textContent = text;
     picker.append(p);
   };
-  if (!matches.length) footer('Nenhum modelo com esse nome. Pode usar assim mesmo, se o serviço aceitar.');
+  if (!state.models.length) footer(modelsEmptyNote());
+  else if (!matches.length) footer('Nenhum modelo com esse nome. Pode usar assim mesmo, se o serviço aceitar.');
   else if (matches.length > MODEL_PICKER_MAX) {
     footer(`E mais ${matches.length - MODEL_PICKER_MAX}: digite para filtrar.`);
   }
 
   picker.hidden = false;
+  $('modelRow').dataset.open = 'true';
   $('pModel').setAttribute('aria-expanded', 'true');
   if (state.pickerIndex >= 0) {
     $('pModel').setAttribute('aria-activedescendant', `model-option-${state.pickerIndex}`);
@@ -2105,6 +2191,16 @@ function bindModelField() {
   const field = $('pModel');
   field.onfocus = openModelPicker;
   field.onblur = closeModelPicker;
+  // mousedown, não click: o click viria depois do blur, que fecha a lista.
+  $('modelCaret').onmousedown = (event) => {
+    event.preventDefault();
+    if ($('modelPicker').hidden) {
+      field.focus();
+      openModelPicker();
+    } else {
+      closeModelPicker();
+    }
+  };
   field.oninput = () => {
     state.pickerIndex = -1;
     if (state.models.length) renderModelPicker();
@@ -2114,9 +2210,9 @@ function bindModelField() {
     const picker = $('modelPicker');
     const count = Math.min(modelMatches().length, MODEL_PICKER_MAX);
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      if (!state.models.length) return;
       event.preventDefault();
       if (picker.hidden) return openModelPicker();
+      if (!count) return;
       const step = event.key === 'ArrowDown' ? 1 : -1;
       state.pickerIndex = (state.pickerIndex + step + count) % Math.max(count, 1);
       renderModelPicker();
@@ -2239,10 +2335,13 @@ function wire() {
     }
   };
 
-  $('settingsBtn').onclick = () => { $('settingsSheet').hidden = false; loadSettings(); };
-  $('closeSettings').onclick = () => { $('settingsSheet').hidden = true; };
-  $('settingsSheet').onclick = (event) => {
-    if (event.target === $('settingsSheet')) $('settingsSheet').hidden = true;
+  $('settingsBtn').onclick = openSettings;
+  $('closeSettings').onclick = closeSettings;
+  window.addEventListener('hashchange', applyRoute);
+
+  $('claudeRecheck').onclick = async () => {
+    await checkClaude();
+    toast('Estado do Claude atualizado.');
   };
 
   $('saveProvider').onclick = saveProvider;
@@ -2261,7 +2360,7 @@ function wire() {
       toast('Salvo');
     }
     if (event.key === 'Escape') {
-      $('settingsSheet').hidden = true;
+      if (!$('settingsPage').hidden) closeSettings();
       closeImport();
       closeSummary();
       closeExportMenu();
@@ -2303,6 +2402,7 @@ function setPreviewMode(translated) {
 }
 
 wire();
+applyRoute();
 loadProjects();
 loadSettings();
 resumeImports();

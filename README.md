@@ -94,9 +94,9 @@ seguintes reaproveitam o que já foi baixado. A porta é publicada só em
 - **OCR:** a imagem já traz o Tesseract com português e inglês.
 - **Claude pela assinatura (experimental):** ponha
   `INTERLINEAR_WITH_CLAUDE=1` no `.env` e reconstrua; a imagem passa a trazer
-  o Claude Code (~350 MB a mais). Em Configurações, o provedor mostra como
-  entrar com a sua conta, uma vez só — no Docker, pela aba Exec do container
-  (sem Docker é um clique). O login fica no volume `interlinear-claude`
+  o Claude Code (~350 MB a mais). Em Configurações, a seção "Claude pela
+  assinatura" mostra o estado da conta e como entrar, uma vez só — no Docker,
+  pela aba Exec do container. O login fica no volume `interlinear-claude`
   ([docs/provedores.md](docs/provedores.md)).
 - **Logs:** `docker compose logs -f`
 - **Parar:** `docker compose down`

@@ -99,7 +99,11 @@ async def upsert_provider(payload: dict[str, Any] = Body(...)) -> dict[str, Any]
 
     api_key = str(payload.get("api_key") or "")
     base_url = str(payload.get("base_url") or "")
-    if not api_key and existing:
+    # O Claude pela assinatura não fala com a API: guardar uma chave nesse
+    # perfil só deixaria um segredo parado onde ninguém vai usá-lo.
+    if kind == "claude_cli":
+        api_key = ""
+    elif not api_key and existing:
         # Manter a chave só faz sentido se ela continuar indo para o mesmo
         # lugar. Trocar o endereço sem redigitar a chave seria o jeito de
         # desviá-la para outro servidor.

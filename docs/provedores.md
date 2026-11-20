@@ -39,7 +39,12 @@ uma chave de API). "Testar conexão" mostra o plano.
 
 ### Entrar na conta
 
-Fora do Docker, o painel "Conectar" tem o botão **Entrar com a conta Claude**.
+**Configurações** é uma página (`#/configuracoes`), e a primeira seção dela é
+**Claude pela assinatura**: diz se a conta está conectada, em que plano, até
+quando vale o login e quando foi a última leitura, com um botão **Verificar
+agora**. Ela fica sempre à vista, independente do provedor selecionado.
+
+Fora do Docker, essa seção tem o botão **Entrar com a conta Claude**.
 Ele não faz o login: abre uma **janela de terminal desta máquina** rodando o
 `claude auth login` oficial — como um atalho na área de trabalho. O Claude Code
 abre a página da Anthropic no navegador, você autoriza, e o painel avisa
@@ -48,26 +53,26 @@ Anthropic; o Interlinear não recebe nada disso do navegador.
 
 Dá no mesmo rodar `./run.sh login` (ou `.\run.ps1 login` no Windows).
 
-Dentro do Docker o botão não aparece: o container não alcança a sua área de
-trabalho, então lá o caminho é a aba Exec (abaixo).
+Dentro do Docker o botão não aparece, e a seção diz isso com todas as letras:
+o container não alcança a sua área de trabalho, então lá o login é feito pelo
+próprio container, pela aba Exec (abaixo).
 
-O painel mostra o estado em uma linha — conectado e em que plano, ou o que
-falta — e a lista de provedores repete isso numa bolinha ao lado do modelo,
-para dar para ver sem abrir o formulário.
+A lista de provedores repete o estado numa bolinha ao lado do modelo
+("conectado" / "não conectado"), para dar para ver sem rolar a página.
 
 ### Com Docker
 
 1. No arquivo `.env` ao lado do `compose.yaml`, ponha
    `INTERLINEAR_WITH_CLAUDE=1`, e reconstrua: `docker compose up -d --build`.
    A imagem passa a trazer o Claude Code (~350 MB a mais).
-2. Em **Configurações → Adicionar provedor**, escolha "Claude pela
-   assinatura". O painel logo abaixo diz se o Claude Code está logado.
+2. Abra **Configurações**: a seção **Claude pela assinatura**, no alto, diz
+   se o Claude Code está logado.
 3. Se não estiver, entre **uma vez**: no Docker Desktop, abra
    **Containers → interlinear → aba Exec** e rode `claude auth login` (ou,
    num terminal, `docker exec -it interlinear claude auth login`). Escolha a
    conta Claude, autorize na página da Anthropic e cole o código que ela
    mostrar de volta no Exec.
-4. O painel confere sozinho a cada poucos segundos e mostra "Conectado ao
+4. A seção confere sozinha a cada poucos segundos e mostra "Conectado ao
    Claude, plano …" quando você entrar.
 
 O login fica no volume `interlinear-claude` (pasta `/claude`, via
@@ -90,17 +95,16 @@ Interlinear não tem como vê-lo.
 1. [Claude Code](https://claude.com/claude-code) instalado.
 2. O Interlinear rodando direto na máquina, com Python 3.11 ou mais novo
    (veja "Instalação" no README).
-3. Em **Configurações → Adicionar provedor**, escolha "Claude pela
-   assinatura" e clique em **Entrar com a conta Claude**. Nada de terminal:
-   o botão abre a janela e o navegador por você.
+3. Em **Configurações**, na seção "Claude pela assinatura", clique em
+   **Entrar com a conta Claude**. Nada de terminal: o botão abre a janela e
+   o navegador por você.
 4. Se o `claude` não estiver no `PATH`, aponte `INTERLINEAR_CLAUDE` para ele.
 
 ### Cadastro
 
 Em **Configurações → Adicionar provedor**, escolha "Claude pela assinatura".
 Não há chave nem endereço. O modelo é um apelido: `haiku` (mais rápido e
-econômico), `sonnet` (o padrão) ou `opus`. O painel "Conectar" mostra se o
-Claude Code está logado com a assinatura e até quando vale o login.
+econômico), `sonnet` (o padrão) ou `opus`, que aparecem como opções.
 
 ### Limites do plano
 

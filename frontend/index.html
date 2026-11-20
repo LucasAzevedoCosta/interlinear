@@ -257,112 +257,138 @@
 </div>
 
 <!-- Painel de configurações -->
-<div class="sheet" id="settingsSheet" hidden>
-  <div class="sheet__panel" role="dialog" aria-label="Configurações">
-    <div class="sheet__head">
-      <h2>Configurações</h2>
-      <button class="btn btn--quiet" id="closeSettings">Fechar</button>
-    </div>
+<!-- Configurações: página inteira, na rota #/configuracoes. Cobre o app
+     todo de propósito: é uma tela de trabalho, não uma gaveta. -->
+<section class="settings" id="settingsPage" hidden>
 
-    <p class="field__hint" style="margin-bottom:16px">
-      As chaves ficam só nesta máquina, num arquivo que apenas o seu usuário lê.
-      Elas são enviadas unicamente para o provedor que você escolher.
-    </p>
+  <header class="settings__bar">
+    <span class="bar__mark">Interlinear</span>
+    <span class="settings__crumb">Configurações</span>
+    <button class="btn btn--quiet" id="closeSettings">Voltar</button>
+  </header>
 
-    <div id="providerList"></div>
+  <div class="settings__inner">
 
-    <hr class="section-rule"/>
-    <h3 style="font-size:13px;font-weight:600;margin:0 0 12px">Adicionar provedor</h3>
-
-    <div class="field">
-      <label for="pKind">Serviço</label>
-      <select id="pKind"></select>
-      <p class="field__hint" id="pHint"></p>
-    </div>
-
-    <!-- Claude pela assinatura: como entrar, e se já entrou. -->
-    <div class="connect" id="claudeConnect" hidden aria-live="polite"></div>
-
-    <div class="field">
-      <label for="pLabel">Nome deste perfil</label>
-      <input type="text" id="pLabel" placeholder="Ex.: Gemini barato"/>
-    </div>
-
-    <div class="field" id="baseField">
-      <label for="pBase">Endereço da API</label>
-      <input type="text" id="pBase"/>
-    </div>
-
-    <div class="field" id="keyField">
-      <label for="pKey">Chave de API</label>
-      <input type="password" id="pKey" placeholder="cole aqui" autocomplete="off"/>
-    </div>
-
-    <div class="field">
-      <label for="pModel">Modelo</label>
-      <div class="model-field" id="modelRow">
-        <div class="row">
-          <input type="text" id="pModel" placeholder="escolha na lista ou digite o nome"
-                 autocomplete="off" spellcheck="false" role="combobox"
-                 aria-autocomplete="list" aria-controls="modelPicker" aria-expanded="false"/>
-          <button class="btn" id="loadModels" style="flex:0 0 auto">Listar modelos</button>
-        </div>
-        <div class="model-picker" id="modelPicker" role="listbox" hidden></div>
+    <!-- Claude pela assinatura: o estado da conta, sempre à vista. -->
+    <section class="settings__block" id="claudeBlock">
+      <div class="settings__block-head">
+        <h2>Claude pela assinatura</h2>
+        <button class="btn btn--quiet" id="claudeRecheck">Verificar agora</button>
       </div>
-      <!-- Serviços com poucos modelos fixos (Claude pela assinatura): opções. -->
-      <div class="model-choices" id="modelChoices" role="radiogroup" aria-label="Modelo" hidden></div>
-      <p class="field__hint" id="modelHint"></p>
-    </div>
-
-    <div class="row">
-      <button class="btn btn--primary" id="saveProvider">Salvar provedor</button>
-      <button class="btn" id="testProvider">Testar conexão</button>
-    </div>
-
-    <hr class="section-rule"/>
-    <h3 style="font-size:13px;font-weight:600;margin:0 0 12px">Tradução</h3>
-
-    <div class="row">
-      <div class="field">
-        <label for="srcLang">Idioma de origem</label>
-        <input type="text" id="srcLang"/>
-      </div>
-      <div class="field">
-        <label for="tgtLang">Idioma de destino</label>
-        <input type="text" id="tgtLang"/>
-      </div>
-    </div>
-
-    <div class="field">
-      <label for="styleNotes">Instruções de estilo</label>
-      <textarea id="styleNotes" placeholder="Ex.: mantenha o tratamento por 'você'. Preserve o tom seco do narrador."></textarea>
-    </div>
-
-    <div class="field">
-      <label for="glossary">Glossário</label>
-      <textarea id="glossary" placeholder="termo original = tradução&#10;Shire = Condado"></textarea>
       <p class="field__hint">
-        Um par por linha. Vai em todo lote, o que mantém nomes e termos iguais
-        do começo ao fim do livro.
+        Traduz com os limites do seu plano Pro ou Max, sem chave de API. Quem
+        faz o login é o Claude Code, pelo fluxo da Anthropic: o Interlinear só
+        lê o estado da conta, nunca o seu token.
       </p>
-    </div>
+      <div class="connect" id="claudeConnect" aria-live="polite"></div>
+    </section>
 
-    <div class="row">
-      <div class="field">
-        <label for="batchChars">Tamanho do lote</label>
-        <input type="number" id="batchChars" min="500" max="20000" step="250"/>
-        <p class="field__hint">Caracteres por pedido.</p>
-      </div>
-      <div class="field">
-        <label for="concurrency">Pedidos simultâneos</label>
-        <input type="number" id="concurrency" min="1" max="16"/>
-        <p class="field__hint">Reduza se bater limite de taxa.</p>
-      </div>
-    </div>
+    <section class="settings__block">
+      <h2>Provedores de IA</h2>
+      <p class="field__hint">
+        As chaves ficam só nesta máquina, num arquivo que apenas o seu usuário
+        lê. Elas são enviadas unicamente para o provedor que você escolher.
+      </p>
 
-    <button class="btn btn--primary" id="saveSettings">Salvar preferências</button>
+      <div id="providerList"></div>
+
+      <h3 class="settings__sub">Adicionar provedor</h3>
+
+      <div class="field">
+        <label for="pKind">Serviço</label>
+        <select id="pKind"></select>
+        <p class="field__hint" id="pHint"></p>
+      </div>
+
+      <div class="field">
+        <label for="pLabel">Nome deste perfil</label>
+        <input type="text" id="pLabel" placeholder="Ex.: Gemini barato"/>
+      </div>
+
+      <div class="field" id="baseField">
+        <label for="pBase">Endereço da API</label>
+        <input type="text" id="pBase"/>
+      </div>
+
+      <div class="field" id="keyField">
+        <label for="pKey">Chave de API</label>
+        <input type="password" id="pKey" placeholder="cole aqui" autocomplete="off"/>
+      </div>
+
+      <div class="field">
+        <label for="pModel">Modelo</label>
+        <div class="model-field" id="modelRow">
+          <div class="row">
+            <!-- Campo de escrever com lista: dá para escolher na lista e
+                 também digitar um nome que o serviço aceite mas não liste. -->
+            <span class="model-input">
+              <input type="text" id="pModel" placeholder="escolha na lista ou digite o nome"
+                     autocomplete="off" spellcheck="false" role="combobox"
+                     aria-autocomplete="list" aria-controls="modelPicker" aria-expanded="false"/>
+              <button class="model-input__caret" id="modelCaret" type="button"
+                      tabindex="-1" aria-label="Mostrar os modelos">▾</button>
+            </span>
+            <button class="btn btn--quiet" id="loadModels" style="flex:0 0 auto">Atualizar</button>
+          </div>
+          <div class="model-picker" id="modelPicker" role="listbox" hidden></div>
+        </div>
+        <!-- Serviços com poucos modelos fixos (Claude pela assinatura): opções. -->
+        <div class="model-choices" id="modelChoices" role="radiogroup" aria-label="Modelo" hidden></div>
+        <p class="field__hint" id="modelHint"></p>
+      </div>
+
+      <div class="row">
+        <button class="btn btn--primary" id="saveProvider">Salvar provedor</button>
+        <button class="btn" id="testProvider">Testar conexão</button>
+      </div>
+    </section>
+
+    <section class="settings__block">
+      <h2>Tradução</h2>
+
+      <div class="row">
+        <div class="field">
+          <label for="srcLang">Idioma de origem</label>
+          <input type="text" id="srcLang"/>
+        </div>
+        <div class="field">
+          <label for="tgtLang">Idioma de destino</label>
+          <input type="text" id="tgtLang"/>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="styleNotes">Instruções de estilo</label>
+        <textarea id="styleNotes" placeholder="Ex.: mantenha o tratamento por 'você'. Preserve o tom seco do narrador."></textarea>
+      </div>
+
+      <div class="field">
+        <label for="glossary">Glossário</label>
+        <textarea id="glossary" placeholder="termo original = tradução&#10;Shire = Condado"></textarea>
+        <p class="field__hint">
+          Um par por linha. Vai em todo lote, o que mantém nomes e termos iguais
+          do começo ao fim do livro.
+        </p>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="batchChars">Tamanho do lote</label>
+          <input type="number" id="batchChars" min="500" max="20000" step="250"/>
+          <p class="field__hint">Caracteres por pedido.</p>
+        </div>
+        <div class="field">
+          <label for="concurrency">Pedidos simultâneos</label>
+          <input type="number" id="concurrency" min="1" max="16"/>
+          <p class="field__hint">Reduza se bater limite de taxa.</p>
+        </div>
+      </div>
+
+      <button class="btn btn--primary" id="saveSettings">Salvar preferências</button>
+    </section>
+
   </div>
-</div>
+</section>
 
 <div class="toast" id="toast" hidden></div>
 
