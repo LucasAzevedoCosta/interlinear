@@ -101,9 +101,9 @@ def page_blocks(document: Document, page: int) -> list[Case]:
     """Os blocos da página, de qualquer capítulo, como casos sem motivo de suspeita."""
     found: list[Case] = []
     for chapter in document.chapters:
-        for block in chapter.blocks:
+        for index, block in enumerate(chapter.blocks):
             if block.page == page and block.kind not in ("image", "page_break"):
-                found.append(Case(chapter.id, block, [VISUAL_REASON]))
+                found.append(Case(chapter.id, block, [VISUAL_REASON], opens_chapter=index == 0))
     return found
 
 

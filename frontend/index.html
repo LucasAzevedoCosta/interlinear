@@ -300,6 +300,8 @@
       <button class="btn btn--primary" id="reviewAcceptAll">Aceitar todas</button>
       <button class="btn btn--quiet" id="reviewRejectAll">Rejeitar as pendentes</button>
     </div>
+    <div class="review-applied" id="reviewApplied"></div>
+    <button class="btn btn--quiet" id="reviewUndoAuto" hidden>Desfazer as automáticas</button>
     <p class="review-sheet__done" id="reviewDone"></p>
   </div>
 </div>
@@ -389,6 +391,56 @@
         <button class="btn btn--primary" id="saveProvider">Salvar provedor</button>
         <button class="btn" id="testProvider">Testar conexão</button>
       </div>
+    </section>
+
+    <section class="settings__block">
+      <h2>Revisão da conversão por IA</h2>
+      <p class="field__hint">
+        O modelo confere os trechos duvidosos da conversão e sugere correções.
+        Usa o provedor ativo acima.
+      </p>
+
+      <fieldset class="choice">
+        <legend>Quando a IA sugere uma correção</legend>
+        <label class="choice__option">
+          <input type="radio" name="reviewMode" value="suggest"/>
+          <span>
+            <b>Só sugerir</b>
+            <span>Nada muda no livro sem você aceitar, uma a uma ou em grupo.</span>
+          </span>
+        </label>
+        <label class="choice__option">
+          <input type="radio" name="reviewMode" value="auto"/>
+          <span>
+            <b>Aplicar sozinho as de baixo risco</b>
+            <span>
+              Apagar número de página e cabeçalho, juntar parágrafo partido e
+              corrigir letra trocada, quando a confiança passa do limite. Tudo
+              pode ser desfeito. Trocar o tipo, mexer em capítulos e inserir
+              texto continuam esperando você.
+            </span>
+          </span>
+        </label>
+      </fieldset>
+
+      <div class="field">
+        <label for="reviewAutoThreshold">Aplicar sozinho só com confiança de pelo menos</label>
+        <select id="reviewAutoThreshold">
+          <option value="0.95">95%</option>
+          <option value="0.9">90%</option>
+          <option value="0.8">80%</option>
+        </select>
+      </div>
+
+      <label class="choice__option">
+        <input type="checkbox" id="reviewAfterImport"/>
+        <span>
+          <b>Revisar assim que a importação de um PDF terminar</b>
+          <span>A revisão dos trechos duvidosos começa sozinha; o livro já abre com ela andando.</span>
+        </span>
+      </label>
+
+      <button class="btn btn--primary" id="saveReviewSettings">Salvar</button>
     </section>
 
     <section class="settings__block">

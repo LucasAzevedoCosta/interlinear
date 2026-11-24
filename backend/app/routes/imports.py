@@ -17,9 +17,10 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from ..core import ocr
 from ..core.importer import LANGUAGES, import_file
-from ..deps import get_store
+from ..deps import get_settings_store, get_store
 from ..jobs import ImportCancelled, imports
 from .projects import MAX_UPLOAD_BYTES, import_options, read_upload
+from .review import launch_review
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/imports", tags=["imports"])
@@ -92,6 +93,7 @@ async def start_import(
             )
             job.project_id = meta.id
             status = "done"
+            await _review_after_import(meta.id, suffix)
         except ImportCancelled:
             status = "stopped"
         except ValueError as exc:
@@ -107,6 +109,20 @@ async def start_import(
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
     return {"import": job.to_dict()}
+
+
+async def _review_after_import(project_id: str, suffix: str) -> None:
+    """Começa a revisão por IA do PDF recém-importado, se o usuário pediu.
+
+    Nunca derruba a importação: sem provedor configurado, ou sem trecho
+    duvidoso, o livro só abre sem revisão.
+    """
+    if suffix != ".pdf" or not get_settings_store().load().review_after_import:
+        return
+    try:
+        await launch_review(project_id)
+    except HTTPException as exc:
+        log.info("Revisão depois da importação não começou: %s", exc.detail)
 
 
 @router.get("")

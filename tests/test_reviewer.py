@@ -256,3 +256,25 @@ def test_sem_suspeitos_nao_chama_o_modelo():
     provider = Scripted(reply_for)
     result = review(provider, document)
     assert provider.requests == [] and result.total == 0
+
+
+def test_comecar_capitulo_no_bloco_que_ja_abre_o_capitulo_vira_ok():
+    # Visto com o Claude: no capítulo curto, o título que já abre o capítulo
+    # voltava como start_chapter ("é um começo de capítulo legítimo"), a
+    # validação descartava, e o trecho ficava marcado sem sugestão.
+    first = Document(
+        chapters=[
+            Chapter("C1", [Block("paragraph", LONG, page=1)]),
+            Chapter(
+                "C2", [Block("heading1", "Dedicatória", page=2), Block("paragraph", "Para ela.")]
+            ),
+        ]
+    )
+    cases = build_cases(first, find_suspects(first))
+    opener = next(c for c in cases if c.block.text == "Dedicatória")
+    assert opener.opens_chapter
+    assert "TRECHO (título 1, página 2, primeiro bloco do capítulo): Dedicatória" in format_case(
+        1, opener
+    )
+    (proposal,) = parse_reply(json.dumps([{"n": 1, "op": "start_chapter"}]), [opener])
+    assert proposal.op == "ok"

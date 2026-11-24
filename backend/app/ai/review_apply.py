@@ -37,7 +37,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ..core import editing
-from ..core.blocks import Document, new_id
+from ..core.blocks import Block, Chapter, Document, new_id
 from ..core.review import Suspect
 from ..core.storage import ProjectStore
 from .review_validation import validate
@@ -143,6 +143,10 @@ def view(document: Document, review: dict[str, Any]) -> list[dict[str, Any]]:
         item = dict(suggestion)
         if item.get("status") == "pending":
             item["problem"] = check(document, suggestion) or ""
+        # O registro para desfazer traz blocos inteiros; a tela só precisa
+        # saber se dá.
+        item["undoable"] = item.pop("undo", None) is not None and item.get("status") == "accepted"
+        item.pop("seq", None)
         shown.append(item)
     return shown
 
@@ -171,8 +175,11 @@ def open_suspects(
 # --------------------------------------------------------------------------
 
 
-def apply(document: Document, suggestion: dict[str, Any]) -> None:
-    """Aplica a sugestão ao documento. Levanta EditError se não for possível."""
+def apply(document: Document, suggestion: dict[str, Any]) -> dict[str, Any]:
+    """Aplica a sugestão ao documento e devolve o que é preciso para desfazer.
+
+    Levanta EditError se não for possível.
+    """
     problem = check(document, suggestion)
     if problem:
         raise editing.EditError(problem)
@@ -184,26 +191,125 @@ def apply(document: Document, suggestion: dict[str, Any]) -> None:
     block = chapter.blocks[index]
 
     if op == "ok":
-        return
-    if op == "merge_next":
-        editing.merge_with_next(document, block_id)
-    elif op == "merge_prev":
+        return {}
+    if op in ("merge_next", "merge_prev"):
         # "B continua o A" é o "juntar com o próximo" do A.
-        editing.merge_with_next(document, chapter.blocks[index - 1].id)
-    elif op == "set_kind":
+        first = index if op == "merge_next" else index - 1
+        originals = [chapter.blocks[first].to_dict(), chapter.blocks[first + 1].to_dict()]
+        _, merged = editing.merge_with_next(document, chapter.blocks[first].id)
+        return {"merged": merged.to_dict(), "originals": originals}
+    if op == "set_kind":
+        before = block.kind
         editing.set_kind(block, payload["kind"])
-    elif op == "delete":
-        editing.delete_block(document, block_id)
-    elif op == "fix_text":
+        return {"kind": before, "applied_kind": block.kind}
+    if op == "delete":
+        _, removed, position = editing.delete_block(document, block_id)
+        after = chapter.blocks[position - 1].id if position > 0 else None
+        return {"chapter_id": chapter.id, "after": after, "block": removed.to_dict()}
+    if op == "fix_text":
+        before = block.to_dict()
         editing.set_text(block, payload["text"])
-    elif op == "start_chapter":
-        editing.split_chapter(document, chapter.id, block_id)
-    elif op == "merge_chapter":
-        editing.merge_chapter(document, chapter.id)
+        return {"before": before, "applied_text": block.text}
+    if op == "start_chapter":
+        created = editing.split_chapter(document, chapter.id, block_id)
+        return {"chapter_id": created.id, "from_chapter": chapter.id}
+    if op == "merge_chapter":
+        first_block = chapter.blocks[0].id if chapter.blocks else None
+        into = editing.merge_chapter(document, chapter.id)
+        return {
+            "chapter": {"id": chapter.id, "title": chapter.title},
+            "first_block": first_block,
+            "into": into.id,
+        }
+    if op == "insert_after":
+        inserted = editing.insert_paragraph_after(document, block_id, payload["text"])
+        return {"inserted": inserted.to_dict()}
+    raise editing.EditError(f"Operação desconhecida: {op}")
+
+
+def revert(document: Document, suggestion: dict[str, Any]) -> None:
+    """Desfaz uma sugestão aplicada. Levanta EditError se o livro mudou demais.
+
+    Cada caso confere que o trecho está como a sugestão o deixou: desfazer
+    por cima de uma edição do usuário apagaria a edição.
+    """
+    op = suggestion.get("op")
+    undo = suggestion.get("undo")
+    if undo is None:
+        raise editing.EditError("esta sugestão foi aplicada sem o registro para desfazer")
+    changed = editing.EditError("o trecho foi editado depois; desfaça à mão")
+
+    if op == "ok":
+        return
+    if op in ("merge_next", "merge_prev"):
+        chapter, index = _find(document, undo["merged"]["id"], changed)
+        if chapter.blocks[index].text != undo["merged"]["text"]:
+            raise changed
+        chapter.blocks[index : index + 1] = [Block.from_dict(b) for b in undo["originals"]]
+    elif op == "set_kind":
+        chapter, index = _find(document, suggestion["block_id"], changed)
+        block = chapter.blocks[index]
+        if block.kind != undo["applied_kind"]:
+            raise changed
+        block.kind = undo["kind"]
+    elif op == "delete":
+        restored = Block.from_dict(undo["block"])
+        if restored.id in document.block_index():
+            raise changed
+        chapter = next((c for c in document.chapters if c.id == undo["chapter_id"]), None)
+        if chapter is None:
+            raise editing.EditError("o capítulo do trecho não existe mais")
+        if undo["after"] is None:
+            chapter.blocks.insert(0, restored)
+        else:
+            position = next(
+                (i for i, b in enumerate(chapter.blocks) if b.id == undo["after"]), None
+            )
+            if position is None:
+                raise changed
+            chapter.blocks.insert(position + 1, restored)
+    elif op == "fix_text":
+        chapter, index = _find(document, suggestion["block_id"], changed)
+        block = chapter.blocks[index]
+        if block.text != undo["applied_text"]:
+            raise changed
+        before = undo["before"]
+        block.text = before["text"]
+        block.translated = before.get("translated")
+        block.meta = dict(before.get("meta") or {})
     elif op == "insert_after":
-        editing.insert_paragraph_after(document, block_id, payload["text"])
+        chapter, index = _find(document, undo["inserted"]["id"], changed)
+        if chapter.blocks[index].text != undo["inserted"]["text"]:
+            raise changed
+        chapter.blocks.pop(index)
+    elif op == "start_chapter":
+        ids = [c.id for c in document.chapters]
+        position = ids.index(undo["chapter_id"]) if undo["chapter_id"] in ids else -1
+        if position < 1 or ids[position - 1] != undo["from_chapter"]:
+            raise editing.EditError("os capítulos mudaram depois; junte à mão")
+        editing.merge_chapter(document, undo["chapter_id"])
+    elif op == "merge_chapter":
+        into = next((c for c in document.chapters if c.id == undo["into"]), None)
+        if into is None:
+            raise editing.EditError("o capítulo não existe mais")
+        old = undo["chapter"]
+        if undo["first_block"] is None:
+            restored = Chapter(title=old["title"], id=old["id"])
+            document.chapters.insert(document.chapters.index(into) + 1, restored)
+        else:
+            if not any(b.id == undo["first_block"] for b in into.blocks[1:]):
+                raise editing.EditError("os capítulos mudaram depois; divida à mão")
+            restored = editing.split_chapter(document, into.id, undo["first_block"])
+            restored.id, restored.title = old["id"], old["title"]
     else:
         raise editing.EditError(f"Operação desconhecida: {op}")
+
+
+def _find(document: Document, block_id: str, error: editing.EditError) -> tuple[Chapter, int]:
+    try:
+        return editing.locate_block(document, block_id)
+    except editing.NotFound:
+        raise error from None
 
 
 def decide(
@@ -250,12 +356,20 @@ def decide(
             for suggestion in sorted(chosen, key=lambda s: order.get(s["block_id"], len(order))):
                 text = _block_text(document, suggestion["block_id"])
                 try:
-                    apply(document, suggestion)
+                    undo = apply(document, suggestion)
                 except editing.EditError as exc:
                     suggestion.update(status="stale", problem=exc.message)
                     outcome["stale"].append({"id": suggestion["id"], "problem": exc.message})
                     continue
-                suggestion.update(status="accepted", decided_by=decided_by, decided_at=now)
+                # seq: desfazer em grupo volta na ordem contrária à de aplicar.
+                review["seq"] = int(review.get("seq", 0)) + 1
+                suggestion.update(
+                    status="accepted",
+                    decided_by=decided_by,
+                    decided_at=now,
+                    undo=undo,
+                    seq=review["seq"],
+                )
                 outcome["accepted"].append(suggestion["id"])
                 if suggestion["op"] == "ok" and text is not None:
                     review.setdefault("dismissed", []).append(
@@ -266,6 +380,80 @@ def decide(
         outcome["document"] = store.update(project_id, change)
         store.update_review(project_id, lambda current: current.update(review))
     return outcome
+
+
+def undo(store: ProjectStore, project_id: str, ids: Sequence[str]) -> dict[str, Any]:
+    """Desfaz sugestões aceitas (pelo usuário ou pelo modo automático).
+
+    Volta na ordem contrária à de aplicar: a última aplicada é a primeira
+    desfeita, para que cada uma encontre o livro como o deixou. A desfeita
+    volta a ser pendente, para o usuário decidir de novo. A que o livro não
+    permite mais desfazer fica como está, com o motivo em "failed".
+
+    Levanta FileNotFoundError se o projeto não existe mais.
+    """
+    wanted = set(ids)
+    outcome: dict[str, Any] = {"undone": [], "failed": [], "document": None}
+
+    with store.lock(project_id):
+        review = store.load_review(project_id)
+        chosen = sorted(
+            (
+                s
+                for s in review.get("suggestions") or []
+                if s.get("id") in wanted and s.get("status") == "accepted"
+            ),
+            key=lambda s: int(s.get("seq", 0)),
+            reverse=True,
+        )
+        if not chosen:
+            return outcome
+
+        def change(document: Document) -> dict[str, Any]:
+            for suggestion in chosen:
+                try:
+                    revert(document, suggestion)
+                except editing.EditError as exc:
+                    outcome["failed"].append({"id": suggestion["id"], "problem": exc.message})
+                    continue
+                for field in ("undo", "seq"):
+                    suggestion.pop(field, None)
+                suggestion.update(status="pending", decided_by="", decided_at="", problem="")
+                outcome["undone"].append(suggestion["id"])
+                if suggestion["op"] == "ok":
+                    review["dismissed"] = [
+                        d
+                        for d in review.get("dismissed") or []
+                        if d.get("block_id") != suggestion["block_id"]
+                    ]
+            return document.to_dict()
+
+        outcome["document"] = store.update(project_id, change)
+        store.update_review(project_id, lambda current: current.update(review))
+    return outcome
+
+
+# O que o modo automático aplica sozinho: o que não muda a estrutura do livro
+# e que a validação consegue conferir. Começar ou juntar capítulo e trocar o
+# tipo erraram com confiança alta no teste com o Claude; inserir texto é o
+# modelo escrevendo. Esses esperam o usuário, sempre.
+AUTO_OPERATIONS = frozenset({"ok", "delete", "fix_text", "merge_next", "merge_prev"})
+
+
+def auto_apply(
+    store: ProjectStore, project_id: str, *, threshold: float, source: str
+) -> dict[str, Any]:
+    """O modo automático: aceita as pendentes de baixo risco acima do limite."""
+    review = store.load_review(project_id)
+    confident = set(select(review, min_confidence=threshold))
+    ids = [
+        s["id"]
+        for s in review.get("suggestions") or []
+        if s.get("id") in confident
+        and s.get("op") in AUTO_OPERATIONS
+        and s.get("source", "text") == source
+    ]
+    return decide(store, project_id, ids, accept=True, decided_by="auto")
 
 
 def select(

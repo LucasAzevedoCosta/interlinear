@@ -546,6 +546,8 @@ button {
   background: var(--pencil);
   border-radius: 2px;
   padding: 1px 4px;
+  white-space: nowrap;
+  flex: none;
 }
 
 .ai__confidence {
@@ -584,6 +586,38 @@ button {
 .ai__accept:hover:not(:disabled) { background: var(--pencil); }
 .ai__accept:disabled { opacity: 0.45; cursor: not-allowed; }
 .ai__reject:hover { border-color: var(--ink-soft); }
+
+/* Modo automático: o que a IA já aplicou, com desfazer. Mais discreto que a
+   sugestão, porque não pede decisão: é registro. */
+.ai--applied { background: #f6f8fa; border-color: #dde3ea; border-left-color: #9fb6d1; }
+.ai--applied .ai__badge { background: #7f97b5; }
+.ai--applied .ai__head b { font-weight: 400; color: var(--ink-soft); }
+.ai--applied .ai__reject { margin-left: auto; }
+
+.review-applied { margin-top: 18px; border-top: 1px solid var(--rule); padding-top: 12px; }
+.review-applied__head { font-size: 13px; font-weight: 500; margin: 0 0 4px; }
+.review-applied__item { display: flex; align-items: center; gap: 10px; padding: 4px 8px; }
+.review-applied__item > span { flex: 1; min-width: 0; }
+#reviewUndoAuto { margin-top: 8px; }
+
+/* Configurações: escolha do modo da revisão. */
+.choice { border: 0; margin: 14px 0; padding: 0; }
+.choice legend { font-size: 12px; color: var(--on-bench-dim); margin-bottom: 6px; padding: 0; }
+.choice__option {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.choice__option:has(input:checked) { border-color: var(--pencil); background: var(--bench-raised); }
+.choice__option input { margin-top: 3px; }
+.choice__option b { display: block; font-weight: 500; font-size: 13px; }
+.choice__option span span { display: block; font-size: 12px; color: var(--on-bench-dim); margin-top: 2px; line-height: 1.5; }
+.settings__block > .choice__option { margin: 4px 0 16px; }
 
 /* Barra: progresso da revisão no lugar do botão. */
 .review-run {

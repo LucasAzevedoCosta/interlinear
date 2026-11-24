@@ -1296,6 +1296,13 @@ function pendingSuggestions() {
   return state.review.suggestions.filter((s) => s.status === 'pending');
 }
 
+// Aceitas que ainda dá para desfazer: as do modo automático primeiro.
+function appliedSuggestions() {
+  return state.review.suggestions
+    .filter((s) => s.status === 'accepted' && s.undoable)
+    .sort((a, b) => (a.decided_by === 'auto' ? 0 : 1) - (b.decided_by === 'auto' ? 0 : 1));
+}
+
 async function loadReview() {
   if (!state.project || state.stage !== 'convert') return;
   const projectId = state.project.id;
@@ -1403,6 +1410,25 @@ async function pollReview() {
   stopReviewPolling();
   applyStage();
   state.review = data;
+  // No modo automático, a tarefa mudou o livro no servidor: sem recarregar,
+  // o editor mostraria blocos que já não existem.
+  if (data.suggestions.some((s) => s.decided_by === 'auto' && s.status === 'accepted')) {
+    await flushSaves();
+    try {
+      const fresh = await api(`/api/projects/${projectId}`);
+      if (state.project?.id === projectId) {
+        state.project = fresh.project;
+        state.doc = fresh.document;
+        if (!currentChapter()) state.chapterId = state.doc.chapters[0]?.id || null;
+        renderRail();
+        renderEditor();
+        refreshPreview();
+        updateStat();
+      }
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  }
   paintSuggestions();
   loadSuspects();
 
@@ -1412,7 +1438,9 @@ async function pollReview() {
     toast('Revisão interrompida.');
   } else {
     const count = pendingSuggestions().length;
-    if (!count) {
+    if (job?.note?.includes('automaticamente') || job?.note?.includes('confirmad')) {
+      toast(`Revisão concluída: ${job.note}.`, 'info', { label: 'Ver', onClick: openReviewSheet });
+    } else if (!count) {
       toast('A IA não sugeriu nenhuma mudança.');
     } else {
       toast(
@@ -1449,9 +1477,14 @@ function renderReviewNav() {
   if (!nav) return;
   nav.innerHTML = '';
   const count = pendingSuggestions().length;
-  nav.hidden = !count;
-  if (!count) return;
-  nav.append(`A IA sugeriu ${count} ${count === 1 ? 'mudança' : 'mudanças'}. `);
+  // "Está certo" confirmado sozinho não mudou o livro: não conta como aplicada.
+  const auto = appliedSuggestions().filter((s) => s.decided_by === 'auto' && s.op !== 'ok').length;
+  nav.hidden = !count && !auto;
+  if (!count && !auto) return;
+  const parts = [];
+  if (count) parts.push(`A IA sugeriu ${count} ${count === 1 ? 'mudança' : 'mudanças'}`);
+  if (auto) parts.push(`${count ? 'aplicou' : 'A IA aplicou'} ${auto} sozinha`);
+  nav.append(`${parts.join(' e ')}. `);
   const open = document.createElement('button');
   open.className = 'editor__link';
   open.textContent = 'Ver todas';
@@ -1503,7 +1536,10 @@ function renderSuggestion(block, wrapper) {
   if (state.stage !== 'convert') return;
   const suggestion = pendingSuggestions().find((s) => s.block_id === block.id);
   wrapper.dataset.suggestion = String(Boolean(suggestion));
-  if (!suggestion) return;
+  if (!suggestion) {
+    renderApplied(block, wrapper);
+    return;
+  }
 
   const card = document.createElement('div');
   card.className = 'ai';
@@ -1570,6 +1606,38 @@ function renderSuggestion(block, wrapper) {
   anchor.after(card);
 }
 
+// O que o modo automático aplicou neste bloco, com "Desfazer". Junção e
+// apagar não aparecem aqui (o bloco mudou de id ou sumiu): ficam no painel.
+function renderApplied(block, wrapper) {
+  const applied = appliedSuggestions().find(
+    (s) => s.block_id === block.id && s.decided_by === 'auto' && s.op !== 'ok'
+  );
+  if (!applied) return;
+  const card = document.createElement('div');
+  card.className = 'ai ai--applied';
+  const head = document.createElement('p');
+  head.className = 'ai__head';
+  const badge = document.createElement('span');
+  badge.className = 'ai__badge';
+  badge.textContent = 'IA aplicou';
+  const title = document.createElement('b');
+  title.textContent = `${OP_LABELS[applied.op] || applied.op}${applied.reason ? `: ${applied.reason}` : ''}`;
+  const undo = document.createElement('button');
+  undo.className = 'ai__reject';
+  undo.textContent = 'Desfazer';
+  undo.onclick = () => undoSuggestions([applied.id]);
+  head.append(badge, title, undo);
+  card.append(head);
+  const anchor = wrapper.querySelector('.block__suspect') || wrapper.querySelector('.block__mark');
+  anchor.after(card);
+}
+
+async function undoSuggestions(ids) {
+  if (!ids.length || !state.project) return;
+  await flushSaves();
+  await sendDecision('/review/undo', { ids });
+}
+
 // Aceita ou rejeita. Aceitar pode mexer em capítulos inteiros: o servidor
 // devolve o livro, e a bancada é redesenhada.
 async function decideSuggestions(ids, accept) {
@@ -1611,8 +1679,10 @@ async function sendDecision(path, body) {
   }
 }
 
-function decisionNote({ accepted = [], rejected = [], stale = [] }) {
+function decisionNote({ accepted = [], rejected = [], stale = [], undone = [], failed = [] }) {
   const parts = [];
+  if (undone.length) parts.push(`${undone.length} ${undone.length === 1 ? 'desfeita: voltou' : 'desfeitas: voltaram'} a ser sugestão`);
+  if (failed.length) parts.push(`${failed.length} não ${failed.length === 1 ? 'deu' : 'deram'} para desfazer (${failed[0].problem})`);
   if (accepted.length) parts.push(`${accepted.length} ${accepted.length === 1 ? 'aplicada' : 'aplicadas'}`);
   if (rejected.length) parts.push(`${rejected.length} ${rejected.length === 1 ? 'rejeitada' : 'rejeitadas'}`);
   if (stale.length) {
@@ -1621,7 +1691,49 @@ function decisionNote({ accepted = [], rejected = [], stale = [] }) {
   return parts.length ? `${parts.join(' · ')}.` : 'Nenhuma sugestão pendente nesse grupo.';
 }
 
-/* Painel: as pendentes por operação, com "aceitar todas" do grupo. */
+/* Painel: as pendentes por operação, com "aceitar todas" do grupo, e as já
+   aplicadas, com "desfazer". */
+
+function renderAppliedList() {
+  const applied = appliedSuggestions();
+  const box = $('reviewApplied');
+  box.innerHTML = '';
+  const auto = applied.filter((s) => s.decided_by === 'auto').length;
+  $('reviewUndoAuto').hidden = !auto;
+  $('reviewUndoAuto').textContent = `Desfazer as automáticas (${auto})`;
+  if (!applied.length) return;
+
+  const head = document.createElement('p');
+  head.className = 'review-applied__head';
+  head.textContent = `Aplicadas (${applied.length}) — dá para desfazer`;
+  box.append(head);
+  const list = document.createElement('ul');
+  list.className = 'review-group__list';
+  for (const suggestion of applied) {
+    const item = document.createElement('li');
+    item.className = 'review-applied__item';
+    const text = document.createElement('span');
+    text.className = 'review-item__text';
+    text.textContent = OP_LABELS[suggestion.op] || suggestion.op;
+    const detail = document.createElement('span');
+    detail.className = 'review-item__detail';
+    detail.textContent = [
+      suggestion.decided_by === 'auto' ? 'aplicada sozinha' : 'aceita por você',
+      percent(suggestion.confidence),
+      suggestion.reason,
+    ].filter(Boolean).join(' · ');
+    const label = document.createElement('span');
+    label.append(text, detail);
+    const undo = document.createElement('button');
+    undo.className = 'btn btn--quiet';
+    undo.textContent = 'Desfazer';
+    undo.onclick = () => undoSuggestions([suggestion.id]);
+    item.append(label, undo);
+    list.append(item);
+  }
+  box.append(list);
+}
+
 
 function openReviewSheet() {
   $('reviewThreshold').value = String(reviewThreshold());
@@ -1647,8 +1759,12 @@ function renderReviewSheet() {
   const pending = pendingSuggestions();
 
   const when = review.reviewed_at ? new Date(review.reviewed_at).toLocaleString('pt-BR') : '';
+  const auto = state.settings?.review_mode === 'auto';
+  const rule = auto
+    ? `Modo automático: o de baixo risco acima de ${percent(state.settings.review_threshold)} é aplicado sozinho; o resto espera você.`
+    : 'Nada muda no livro sem você aceitar.';
   $('reviewMeta').textContent = review.reviewed_at
-    ? `Revisado com ${review.model || review.provider} em ${when}. Nada muda no livro sem você aceitar.`
+    ? `Revisado com ${review.model || review.provider} em ${when}. ${rule}`
     : 'Nenhuma revisão ainda. Use "Revisar com IA" na barra de cima.';
 
   const groups = $('reviewGroups');
@@ -1709,6 +1825,8 @@ function renderReviewSheet() {
   $('reviewAcceptAll').textContent = eligible ? `Aceitar todas (${eligible})` : 'Aceitar todas';
   $('reviewAcceptAll').disabled = !eligible;
   $('reviewRejectAll').disabled = !pending.length;
+
+  renderAppliedList();
 
   const decided = review.suggestions.filter((s) => s.status !== 'pending');
   const count = (status) => decided.filter((s) => s.status === status).length;
@@ -2163,6 +2281,7 @@ function renderSettings() {
   $('batchChars').value = settings.batch_chars;
   $('concurrency').value = settings.concurrency;
   $('glossary').value = glossaryToText(settings.glossary || {});
+  renderReviewSettings(settings);
 
   const list = $('providerList');
   list.innerHTML = '';
@@ -2792,6 +2911,43 @@ async function saveGeneralSettings() {
   }
 }
 
+function renderReviewSettings(settings) {
+  const mode = settings.review_mode || 'suggest';
+  for (const radio of document.querySelectorAll('input[name="reviewMode"]')) {
+    radio.checked = radio.value === mode;
+  }
+  const select = $('reviewAutoThreshold');
+  const value = String(settings.review_threshold ?? 0.9);
+  if (![...select.options].some((o) => o.value === value)) {
+    select.append(new Option(percent(Number(value)), value));
+  }
+  select.value = value;
+  select.disabled = mode !== 'auto';
+  $('reviewAfterImport').checked = Boolean(settings.review_after_import);
+}
+
+async function saveReviewSettings() {
+  const mode = document.querySelector('input[name="reviewMode"]:checked')?.value || 'suggest';
+  try {
+    const data = await api('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        review_mode: mode,
+        review_threshold: Number($('reviewAutoThreshold').value),
+        review_after_import: $('reviewAfterImport').checked,
+      }),
+    });
+    state.settings = data.settings;
+    renderReviewSettings(data.settings);
+    toast(mode === 'auto'
+      ? `Revisão: aplica sozinho acima de ${percent(data.settings.review_threshold)}`
+      : 'Revisão: só sugere');
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+
 function glossaryToText(glossary) {
   return Object.entries(glossary).map(([k, v]) => `${k} = ${v}`).join('\n');
 }
@@ -2861,6 +3017,14 @@ function wire() {
     renderReviewSheet();
   };
   $('reviewAcceptAll').onclick = () => acceptGroup(null);
+  $('reviewUndoAuto').onclick = () => {
+    const ids = appliedSuggestions().filter((s) => s.decided_by === 'auto').map((s) => s.id);
+    if (ids.length) undoSuggestions(ids);
+  };
+  $('saveReviewSettings').onclick = saveReviewSettings;
+  for (const radio of document.querySelectorAll('input[name="reviewMode"]')) {
+    radio.onchange = () => { $('reviewAutoThreshold').disabled = radio.value !== 'auto' || !radio.checked; };
+  }
   $('reviewRejectAll').onclick = () => {
     const ids = pendingSuggestions().map((s) => s.id);
     if (ids.length && confirm(`Rejeitar as ${ids.length} sugestões pendentes? Elas não voltam numa nova revisão.`)) {

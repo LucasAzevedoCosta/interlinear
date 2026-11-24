@@ -52,6 +52,18 @@ class ProviderProfile:
         return data
 
 
+REVIEW_MODES = ("suggest", "auto")
+
+
+def clamp_threshold(value: Any) -> float:
+    """Confiança mínima do modo automático, entre 0,5 e 1. Inválida: 0,9."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.9
+    return 0.9 if number != number else max(0.5, min(number, 1.0))
+
+
 @dataclass
 class Settings:
     providers: list[ProviderProfile] = field(default_factory=list)
@@ -65,6 +77,13 @@ class Settings:
     batch_chars: int = 3500
     concurrency: int = 3
     context_blocks: int = 1
+    # Revisão da conversão por IA (docs-local/revisao-ia-modo-sugestao.md).
+    # "suggest": tudo espera o usuário. "auto": as sugestões de baixo risco
+    # acima de review_threshold são aplicadas sozinhas, com desfazer.
+    review_mode: str = "suggest"
+    review_threshold: float = 0.9
+    # Revisar os trechos duvidosos assim que a importação de um PDF termina.
+    review_after_import: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -77,6 +96,9 @@ class Settings:
             "batch_chars": self.batch_chars,
             "concurrency": self.concurrency,
             "context_blocks": self.context_blocks,
+            "review_mode": self.review_mode,
+            "review_threshold": self.review_threshold,
+            "review_after_import": self.review_after_import,
         }
 
     def redacted(self) -> dict[str, Any]:
@@ -102,6 +124,11 @@ class Settings:
             batch_chars=int(data.get("batch_chars", 3500)),
             concurrency=int(data.get("concurrency", 3)),
             context_blocks=int(data.get("context_blocks", 1)),
+            review_mode=REVIEW_MODES[0]
+            if data.get("review_mode") not in REVIEW_MODES
+            else data["review_mode"],
+            review_threshold=clamp_threshold(data.get("review_threshold", 0.9)),
+            review_after_import=bool(data.get("review_after_import", False)),
         )
 
     def get_provider(self, provider_id: str | None = None) -> ProviderProfile | None:

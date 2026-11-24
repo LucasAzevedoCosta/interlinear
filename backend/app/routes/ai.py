@@ -17,7 +17,7 @@ from ..ai.providers import (
     claude_status,
 )
 from ..ai.translator import Progress, TranslationSettings, Translator
-from ..config import ProviderProfile, Settings
+from ..config import REVIEW_MODES, ProviderProfile, Settings, clamp_threshold
 from ..core.blocks import TRANSLATABLE, Block, Document
 from ..core.importer import LANGUAGES
 from ..core.storage import ProjectMeta
@@ -70,6 +70,15 @@ async def write_settings(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
 
     if "active_provider_id" in payload:
         settings.active_provider_id = str(payload["active_provider_id"])
+
+    if "review_mode" in payload:
+        if payload["review_mode"] not in REVIEW_MODES:
+            raise HTTPException(400, "Modo de revisão inválido")
+        settings.review_mode = payload["review_mode"]
+    if "review_threshold" in payload:
+        settings.review_threshold = clamp_threshold(payload["review_threshold"])
+    if "review_after_import" in payload:
+        settings.review_after_import = bool(payload["review_after_import"])
 
     settings.concurrency = max(1, min(settings.concurrency, 16))
     settings.batch_chars = max(500, min(settings.batch_chars, 20_000))

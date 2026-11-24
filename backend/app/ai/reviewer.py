@@ -84,7 +84,8 @@ espaço sobrando ou faltando, letra trocada pelo OCR). Informe "text" com o \
 bloco inteiro corrigido. Corrija SÓ o erro de extração: não reescreva, não \
 traduza, não mude estilo nem pontuação do autor, e mantenha as marcações \
 <em>, <strong> e <sup> como estão.
-- "start_chapter": um capítulo novo começa neste bloco.
+- "start_chapter": um capítulo novo começa neste bloco. Se o trecho já é o \
+primeiro bloco do capítulo e está certo assim, a resposta é "ok".
 - "merge_chapter": o capítulo deste bloco foi separado por engano e devia \
 fazer parte do anterior. Dedicatória, epígrafe, folha de rosto e prefácio \
 curtos são partes legítimas do livro, mesmo com poucas palavras: para eles, \
@@ -131,6 +132,8 @@ class Case:
     after: Block | None = None
     # A evidência de cada motivo (Suspect.detail), na mesma ordem.
     details: list[str] = field(default_factory=list)
+    # O bloco é o primeiro do capítulo: "começar capítulo aqui" já está feito.
+    opens_chapter: bool = False
 
 
 @dataclass
@@ -205,6 +208,7 @@ def build_cases(document: Document, suspects: Sequence[Suspect]) -> list[Case]:
                     before=chapter.blocks[index - 1] if index > 0 else None,
                     after=chapter.blocks[index + 1] if index + 1 < len(chapter.blocks) else None,
                     details=details[block.id],
+                    opens_chapter=index == 0,
                 )
             )
     return cases
@@ -255,7 +259,8 @@ def format_case(n: int, case: Case) -> str:
             _MARKER.format(n=n),
             f"Motivo: {reasons}",
             _neighbor("Bloco anterior", case.before, tail=True),
-            f"TRECHO ({_describe(case.block)}): {case.block.text}",
+            f"TRECHO ({_describe(case.block)}"
+            f"{', primeiro bloco do capítulo' if case.opens_chapter else ''}): {case.block.text}",
             _neighbor("Bloco seguinte", case.after, tail=False),
         ]
     )
@@ -308,6 +313,11 @@ def _proposal(item: dict[str, Any], case: Case) -> Proposal | None:
     op = item.get("op")
     if op not in OPERATIONS:
         return None
+    if op == "start_chapter" and case.opens_chapter:
+        # O modelo quis dizer "aqui começa um capítulo de verdade", e já
+        # começa: é a confirmação de que está certo. Descartar deixaria o
+        # trecho marcado como duvidoso, sem sugestão (visto no teste real).
+        op = "ok"
 
     payload: dict[str, str] = {}
     if op == "set_kind":
