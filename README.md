@@ -36,6 +36,10 @@ exportação, então o que aparece na tela é exatamente o que vai para o arquiv
   e exporta o EPUB sem traduzir nada. Na de tradução, cada original ganha o
   campo da tradução; mudar um original depois marca a tradução dele como
   desatualizada, e o próximo **Traduzir** refaz só esses
+- **Aponta os trechos duvidosos** da conversão (parágrafo partido, cabeçalho
+  que escapou, número de página) e, se você quiser, **revisa com IA**: o
+  modelo sugere o que fazer com cada um e nada muda no livro sem você aceitar
+  ([docs/conversao.md](docs/conversao.md), seções 4 e 5)
 - **Edita** parágrafo a parágrafo, com salvamento automático
 - **Mostra a prévia** de cada capítulo como ele vai aparecer no leitor
 - **Traduz** com OpenAI, Anthropic, Google Gemini, qualquer endpoint compatível

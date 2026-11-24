@@ -384,6 +384,35 @@ marcação de suspeitos  ──→  ~3% dos blocos
          revisão humana
 ```
 
+### Como ficou no Interlinear
+
+**Implementado** como "Revisar com IA", na etapa de conversão. Usa o provedor
+configurado, inclusive o Claude pela assinatura e os modelos locais.
+
+1. Os trechos marcados pela seção 4 vão ao modelo em lotes, cada um com o
+   motivo da marcação, a evidência (por exemplo, "repetido nas páginas 3, 5 e
+   7"), o tipo do bloco, a página, os vizinhos e o título do livro.
+2. O modelo responde com **uma operação de uma lista fechada**: está certo,
+   juntar com o anterior ou com o próximo, trocar o tipo, apagar, corrigir o
+   texto, começar capítulo ou juntar ao capítulo anterior. Ele não reescreve
+   o livro.
+3. Cada resposta é **conferida contra o livro**. Só se junta o que parece
+   partido; a correção de texto só passa se mudar pouco (até 5% dos
+   caracteres) e sem mexer em itálico, negrito ou notas; só se apaga bloco
+   curto. O que não passa é descartado.
+4. O resultado são **sugestões**, que aparecem no bloco com a confiança do
+   modelo e o motivo, e num painel agrupado por operação. Nada muda no livro
+   sem você aceitar, uma a uma ou em grupo acima de um limite de confiança.
+5. Aceitar é uma edição comum, a mesma do botão correspondente, e é conferida
+   de novo, porque você pode ter editado o livro depois da revisão. Uma
+   sugestão rejeitada não volta numa revisão nova. Confirmar "está certo"
+   tira a marca de trecho duvidoso do bloco.
+
+Num livro de teste com um erro de cada tipo, Claude Haiku e Sonnet acertaram
+todas as sugestões em 6 rodadas seguidas, em 3 a 8 segundos por livro. Num
+livro real os erros se misturam, então vale conferir antes de aceitar em
+grupo.
+
 ---
 
 ## 6. Custos

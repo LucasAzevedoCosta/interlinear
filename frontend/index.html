@@ -30,6 +30,12 @@
 
     <div class="bar__actions">
       <button class="btn btn--quiet" id="homeBtn" hidden>Projetos</button>
+      <span class="review-run" id="reviewRun" hidden aria-live="polite">
+        <span id="reviewRunLabel"></span>
+        <button class="btn btn--quiet" id="reviewStop">Parar</button>
+      </span>
+      <button class="btn" id="reviewBtn" hidden
+        title="Manda os trechos duvidosos da conversão para o modelo de IA conferir. Nada muda no livro sem você aceitar.">Revisar com IA</button>
       <button class="btn" id="translateBtn" hidden>Traduzir</button>
       <span class="menu-anchor">
         <button class="btn" id="exportBtn" aria-haspopup="menu" aria-expanded="false" hidden>Exportar EPUB ▾</button>
@@ -253,6 +259,32 @@
     <dl class="summary" id="summaryStats"></dl>
     <div id="summaryWarnings"></div>
     <button class="btn btn--primary" id="summaryDone">Revisar a conversão</button>
+  </div>
+</div>
+
+<!-- Sugestões da revisão por IA, agrupadas por operação -->
+<div class="sheet" id="reviewSheet" hidden>
+  <div class="sheet__panel" role="dialog" aria-labelledby="reviewHeading">
+    <div class="sheet__head">
+      <h2 id="reviewHeading">Sugestões da IA</h2>
+      <button class="btn btn--quiet" id="closeReview">Fechar</button>
+    </div>
+    <p class="review-sheet__meta" id="reviewMeta"></p>
+    <div class="field">
+      <label for="reviewThreshold">Aceitar em grupo só as com confiança de pelo menos</label>
+      <select id="reviewThreshold">
+        <option value="0.9">90%</option>
+        <option value="0.8">80%</option>
+        <option value="0.7">70%</option>
+        <option value="0">qualquer confiança</option>
+      </select>
+    </div>
+    <div id="reviewGroups"></div>
+    <div class="review-sheet__actions">
+      <button class="btn btn--primary" id="reviewAcceptAll">Aceitar todas</button>
+      <button class="btn btn--quiet" id="reviewRejectAll">Rejeitar as pendentes</button>
+    </div>
+    <p class="review-sheet__done" id="reviewDone"></p>
   </div>
 </div>
 

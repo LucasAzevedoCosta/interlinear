@@ -509,6 +509,128 @@ button {
   .block--flash { animation: none; outline: 1px solid var(--pending); }
 }
 
+/* Revisão por IA: a sugestão aparece como uma anotação de revisor, a lápis
+   azul, antes do texto. É proposta, não mudança: nada sai do livro sem o
+   clique em "Aplicar". */
+.editor__review {
+  color: var(--pencil-deep);
+  font-size: 12px;
+  margin: -18px 0 24px;
+}
+
+.ai {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid #cfdcec;
+  border-left: 3px solid var(--pencil);
+  border-radius: var(--radius);
+  background: #f3f7fc;
+  font-family: var(--ui);
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.ai__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  color: var(--ink);
+}
+
+.ai__badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #fff;
+  background: var(--pencil);
+  border-radius: 2px;
+  padding: 1px 4px;
+}
+
+.ai__confidence {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+}
+
+.ai__reason { margin: 4px 0 0; }
+
+.ai__diff {
+  margin: 6px 0 0;
+  font-family: var(--text);
+  font-size: 13px;
+  color: var(--ink);
+}
+.ai__diff del { color: var(--alert); background: #fbeeea; text-decoration: line-through; }
+.ai__diff ins { color: #2f6a3a; background: #e6f2e4; text-decoration: none; }
+
+.ai__problem { margin: 6px 0 0; color: var(--alert); }
+
+.ai__actions { display: flex; gap: 6px; margin-top: 8px; }
+
+.ai__accept,
+.ai__reject {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: var(--radius);
+  border: 1px solid #cfdcec;
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+}
+.ai__accept { background: var(--pencil-deep); border-color: var(--pencil-deep); color: #fff; }
+.ai__accept:hover:not(:disabled) { background: var(--pencil); }
+.ai__accept:disabled { opacity: 0.45; cursor: not-allowed; }
+.ai__reject:hover { border-color: var(--ink-soft); }
+
+/* Barra: progresso da revisão no lugar do botão. */
+.review-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--on-bench-dim);
+  font-variant-numeric: tabular-nums;
+}
+.review-run[hidden] { display: none; }
+
+/* Painel das sugestões */
+.review-sheet__meta { font-size: 12px; color: var(--on-bench-dim); margin: -8px 0 16px; line-height: 1.5; }
+.review-sheet__empty { font-size: 13px; color: var(--on-bench-dim); }
+.review-sheet__actions { display: flex; gap: 8px; margin-top: 18px; }
+.review-sheet__done { font-size: 12px; color: var(--on-bench-dim); margin-top: 14px; }
+
+.review-group { margin: 0 0 16px; border-top: 1px solid var(--rule); padding-top: 12px; }
+.review-group__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.review-group__head b { font-weight: 500; font-size: 13px; }
+.review-group__list { list-style: none; margin: 8px 0 0; padding: 0; }
+
+.review-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.review-item:hover { background: var(--bench-raised); }
+.review-item__text {
+  display: block;
+  font-family: var(--text);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.review-item__detail { display: block; font-size: 11px; color: var(--on-bench-dim); margin-top: 2px; }
+.review-group__list li[data-below="true"] .review-item { opacity: 0.6; }
+
 /* Botão com cara de link, dentro de um texto. */
 .editor__link {
   color: var(--pencil-deep);

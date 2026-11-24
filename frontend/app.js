@@ -44,6 +44,12 @@ const state = {
   suspects: [],
   suspectSeq: 0,
   lastSuspect: null,
+  // Revisão por IA (ver loadReview): sugestões do review.json e a tarefa.
+  review: { suggestions: [] },
+  reviewSeq: 0,
+  reviewTimer: null,
+  // Limite do "aceitar em grupo"; null até o usuário escolher (padrão 90%).
+  reviewThreshold: null,
   // Importações em andamento, pelo id da tarefa (ou um id local enquanto o
   // arquivo ainda sobe).
   imports: new Map(),
@@ -619,6 +625,7 @@ async function openProject(projectId) {
     state.stage = initialStage(data.project);
     state.suspects = [];
     state.lastSuspect = null;
+    state.review = { suggestions: [] };
 
     $('start').hidden = true;
     for (const id of ['rail', 'editor', 'preview']) $(id).hidden = false;
@@ -631,6 +638,7 @@ async function openProject(projectId) {
     refreshPreview();
     updateStat();
     loadSuspects();
+    loadReview();
     watchExistingJob(projectId);
   } catch (error) {
     toast(error.message, 'error');
@@ -643,6 +651,10 @@ function goHome() {
   state.project = null;
   state.doc = null;
   state.suspects = [];
+  state.review = { suggestions: [] };
+  stopReviewPolling();
+  $('reviewRun').hidden = true;
+  $('reviewBtn').hidden = true;
   $('start').hidden = false;
   for (const id of ['rail', 'editor', 'preview']) $(id).hidden = true;
   for (const id of ['homeBtn', 'translateBtn', 'exportBtn', 'bookBar', 'progress']) $(id).hidden = true;
@@ -678,6 +690,7 @@ function setStage(stage) {
   refreshPreview();
   updateStat();
   loadSuspects();
+  loadReview();
 }
 
 function applyStage() {
@@ -685,6 +698,9 @@ function applyStage() {
   $('stageConvert').setAttribute('aria-pressed', !translating);
   $('stageTranslate').setAttribute('aria-pressed', translating);
   $('translateBtn').hidden = !translating;
+  // A revisão por IA é da conversão; enquanto roda, o botão dá lugar ao progresso.
+  $('reviewBtn').hidden = translating || Boolean(state.reviewTimer);
+  $('reviewRun').hidden = translating || !state.reviewTimer;
   $('previewToggle').hidden = !translating;
   $('previewLabel').hidden = translating;
   $('editor').dataset.stage = state.stage;
@@ -831,8 +847,12 @@ function renderEditor() {
     const doubts = document.createElement('p');
     doubts.id = 'suspectNav';
     doubts.className = 'editor__suspects';
-    inner.append(doubts);
+    const suggestions = document.createElement('p');
+    suggestions.id = 'reviewNav';
+    suggestions.className = 'editor__review';
+    inner.append(doubts, suggestions);
     renderSuspectNav();
+    renderReviewNav();
   }
 
   chapter.blocks.forEach((block, index) => {
@@ -891,6 +911,7 @@ function renderBlock(block, next) {
     if (converting) {
       wrapper.append(renderStructureTools(block, next, wrapper));
       renderSuspectNote(block, wrapper);
+      renderSuggestion(block, wrapper);
     }
     return wrapper;
   }
@@ -898,6 +919,7 @@ function renderBlock(block, next) {
   if (converting) {
     wrapper.append(renderSourceEditor(block), renderStructureTools(block, next, wrapper));
     renderSuspectNote(block, wrapper);
+    renderSuggestion(block, wrapper);
   } else {
     wrapper.dataset.state = blockState(block);
     renderTranslation(block, wrapper);
@@ -1174,7 +1196,8 @@ function renderSuspectNote(block, wrapper) {
   if (!found.length) return;
   const note = document.createElement('p');
   note.className = 'block__suspect';
-  note.textContent = found.map((s) => s.message).join(' ');
+  // O detalhe é a evidência: "repetido nas páginas 3, 5 e 7", "9 palavras".
+  note.textContent = found.map((s) => (s.detail ? `${s.message} (${s.detail})` : s.message)).join(' ');
   wrapper.querySelector('.block__mark').after(note);
 }
 
@@ -1216,10 +1239,15 @@ function nextSuspect() {
   const target = ids.find((id) => (order.get(id) ?? -1) > current) || ids[0];
   state.lastSuspect = target;
 
-  const chapter = state.doc.chapters.find((c) => c.blocks.some((b) => b.id === target));
+  goToBlock(target);
+}
+
+// Abre o capítulo do bloco, rola até ele e dá um realce breve.
+function goToBlock(blockId) {
+  const chapter = state.doc.chapters.find((c) => c.blocks.some((b) => b.id === blockId));
   if (!chapter) return;
   if (chapter.id !== state.chapterId) selectChapter(chapter.id);
-  const wrapper = document.querySelector(`.block[data-id="${target}"]`);
+  const wrapper = document.querySelector(`.block[data-id="${blockId}"]`);
   if (!wrapper) return;
   wrapper.scrollIntoView({ block: 'center', behavior: 'smooth' });
   wrapper.classList.remove('block--flash');
@@ -1227,6 +1255,418 @@ function nextSuspect() {
   wrapper.classList.add('block--flash');
   clearTimeout(wrapper.flashTimer);
   wrapper.flashTimer = setTimeout(() => wrapper.classList.remove('block--flash'), 1600);
+}
+
+/* -------------------------------------------------------- revisão por IA */
+
+// O modelo confere os trechos duvidosos e sugere o que fazer; nada muda no
+// livro sem o usuário aceitar (backend/app/routes/review.py). Aceitar é uma
+// edição comum, conferida de novo contra o livro de agora.
+
+const OP_LABELS = {
+  ok: 'Está certo',
+  merge_prev: 'Juntar com o anterior',
+  merge_next: 'Juntar com o próximo',
+  set_kind: 'Trocar o tipo',
+  delete: 'Apagar',
+  fix_text: 'Corrigir o texto',
+  start_chapter: 'Começar capítulo aqui',
+  merge_chapter: 'Juntar ao capítulo anterior',
+};
+
+// Na ordem em que aparecem no painel: o que mais aparece e menos arrisca primeiro.
+const OP_ORDER = [
+  'delete', 'merge_next', 'merge_prev', 'fix_text', 'set_kind',
+  'start_chapter', 'merge_chapter', 'ok',
+];
+
+const THRESHOLD_KEY = 'interlinear.reviewThreshold';
+
+function reviewThreshold() {
+  if (state.reviewThreshold != null) return state.reviewThreshold;
+  try {
+    const saved = localStorage.getItem(THRESHOLD_KEY);
+    if (saved !== null && !Number.isNaN(Number(saved))) return Number(saved);
+  } catch { /* armazenamento bloqueado: usa o padrão */ }
+  return 0.9;
+}
+
+function pendingSuggestions() {
+  return state.review.suggestions.filter((s) => s.status === 'pending');
+}
+
+async function loadReview() {
+  if (!state.project || state.stage !== 'convert') return;
+  const projectId = state.project.id;
+  const seq = ++state.reviewSeq;
+  let data;
+  try {
+    data = await api(`/api/projects/${projectId}/review`);
+  } catch {
+    return; // as sugestões ajudam, mas não podem atrapalhar a edição
+  }
+  if (seq !== state.reviewSeq || state.project?.id !== projectId) return;
+  state.review = data;
+  if (data.job?.status === 'running' && !state.reviewTimer) startReviewPolling(data.job);
+  paintSuggestions();
+}
+
+async function startReview() {
+  if (!state.project) return;
+  await flushSaves();
+  try {
+    const data = await api(`/api/projects/${state.project.id}/review`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    if (!data.job) { toast(data.message || 'Nada a revisar'); return; }
+    toast(`Revisando com ${data.model || data.provider}`);
+    startReviewPolling(data.job);
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+
+function showReviewRun(job) {
+  const done = job.done + job.failed;
+  $('reviewRunLabel').textContent = `Revisando ${done}/${job.total}`;
+}
+
+function startReviewPolling(job) {
+  stopReviewPolling();
+  showReviewRun(job);
+  state.reviewTimer = setInterval(pollReview, 1200);
+  applyStage();
+}
+
+function stopReviewPolling() {
+  clearInterval(state.reviewTimer);
+  state.reviewTimer = null;
+}
+
+async function pollReview() {
+  if (!state.project) return stopReviewPolling();
+  const projectId = state.project.id;
+  let data;
+  try {
+    data = await api(`/api/projects/${projectId}/review`);
+  } catch (error) {
+    stopReviewPolling();
+    applyStage();
+    toast(error.message, 'error');
+    return;
+  }
+  if (state.project?.id !== projectId) return;
+  const job = data.job;
+  if (job?.status === 'running') { showReviewRun(job); return; }
+
+  stopReviewPolling();
+  applyStage();
+  state.review = data;
+  paintSuggestions();
+  loadSuspects();
+
+  if (job?.status === 'error') {
+    toast(`A revisão parou: ${job.error}`, 'error');
+  } else if (job?.status === 'stopped') {
+    toast('Revisão interrompida.');
+  } else {
+    const count = pendingSuggestions().length;
+    if (!count) {
+      toast('A IA não sugeriu nenhuma mudança.');
+    } else {
+      toast(
+        `A IA sugeriu ${count} ${count === 1 ? 'mudança' : 'mudanças'}.`,
+        'info',
+        { label: 'Ver', onClick: openReviewSheet },
+      );
+    }
+  }
+}
+
+async function stopReview() {
+  if (!state.project) return;
+  try {
+    await api(`/api/projects/${state.project.id}/review/stop`, { method: 'POST' });
+    toast('Parando depois dos lotes em andamento…');
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+
+// Redesenha só os cartões, como as marcas de suspeito: sem tirar o cursor.
+function paintSuggestions() {
+  for (const block of currentChapter()?.blocks || []) {
+    const wrapper = document.querySelector(`.block[data-id="${block.id}"]`);
+    if (wrapper) renderSuggestion(block, wrapper);
+  }
+  renderReviewNav();
+  if (!$('reviewSheet').hidden) renderReviewSheet();
+}
+
+function renderReviewNav() {
+  const nav = $('reviewNav');
+  if (!nav) return;
+  nav.innerHTML = '';
+  const count = pendingSuggestions().length;
+  nav.hidden = !count;
+  if (!count) return;
+  nav.append(`A IA sugeriu ${count} ${count === 1 ? 'mudança' : 'mudanças'}. `);
+  const open = document.createElement('button');
+  open.className = 'editor__link';
+  open.textContent = 'Ver todas';
+  open.onclick = openReviewSheet;
+  nav.append(open);
+}
+
+function percent(confidence) {
+  return `${Math.round((confidence || 0) * 100)}%`;
+}
+
+// O trecho que mudou, com um pouco de contexto: "…na <del>l</del><ins>I</ins>sso…".
+function changeExcerpt(before, after, context = 24) {
+  let start = 0;
+  while (start < before.length && start < after.length && before[start] === after[start]) start++;
+  let end = 0;
+  while (
+    end < before.length - start && end < after.length - start &&
+    before[before.length - 1 - end] === after[after.length - 1 - end]
+  ) end++;
+  const head = before.slice(Math.max(0, start - context), start);
+  const tail = before.slice(before.length - end, before.length - end + context);
+  const line = document.createElement('p');
+  line.className = 'ai__diff';
+  if (start > context) line.append('…');
+  line.append(head);
+  const removed = before.slice(start, before.length - end);
+  const added = after.slice(start, after.length - end);
+  if (removed) { const del = document.createElement('del'); del.textContent = removed; line.append(del); }
+  if (added) { const ins = document.createElement('ins'); ins.textContent = added; line.append(ins); }
+  line.append(tail);
+  if (before.length - end + context < before.length) line.append('…');
+  return line;
+}
+
+function suggestionTitle(suggestion, block) {
+  if (suggestion.op === 'set_kind') {
+    const from = KIND_LABELS[block?.kind] || block?.kind || '';
+    const to = KIND_LABELS[suggestion.payload?.kind] || suggestion.payload?.kind;
+    return `Trocar o tipo: ${from} → ${to}`;
+  }
+  if (suggestion.op === 'ok') return 'A IA acha que este trecho está certo';
+  return OP_LABELS[suggestion.op] || suggestion.op;
+}
+
+function renderSuggestion(block, wrapper) {
+  wrapper.querySelector('.ai')?.remove();
+  if (state.stage !== 'convert') return;
+  const suggestion = pendingSuggestions().find((s) => s.block_id === block.id);
+  wrapper.dataset.suggestion = String(Boolean(suggestion));
+  if (!suggestion) return;
+
+  const card = document.createElement('div');
+  card.className = 'ai';
+  card.dataset.op = suggestion.op;
+
+  const head = document.createElement('p');
+  head.className = 'ai__head';
+  const badge = document.createElement('span');
+  badge.className = 'ai__badge';
+  badge.textContent = 'IA';
+  const title = document.createElement('b');
+  title.textContent = suggestionTitle(suggestion, block);
+  const confidence = document.createElement('span');
+  confidence.className = 'ai__confidence';
+  confidence.textContent = percent(suggestion.confidence);
+  confidence.title = 'Confiança do modelo nesta sugestão';
+  head.append(badge, title, confidence);
+  card.append(head);
+
+  if (suggestion.reason) {
+    const reason = document.createElement('p');
+    reason.className = 'ai__reason';
+    reason.textContent = suggestion.reason;
+    card.append(reason);
+  }
+  if (suggestion.op === 'fix_text' && suggestion.payload?.text) {
+    card.append(changeExcerpt(block.text, suggestion.payload.text));
+  }
+  if (suggestion.problem) {
+    const problem = document.createElement('p');
+    problem.className = 'ai__problem';
+    problem.textContent = `Não dá mais para aplicar: ${suggestion.problem}.`;
+    card.append(problem);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'ai__actions';
+  const accept = document.createElement('button');
+  accept.className = 'ai__accept';
+  accept.textContent = suggestion.op === 'ok' ? 'Confirmar' : 'Aplicar';
+  accept.title = suggestion.op === 'ok'
+    ? 'Tira a marca de trecho duvidoso deste bloco'
+    : 'Faz a mudança no livro, como se você tivesse feito à mão';
+  accept.disabled = Boolean(suggestion.problem);
+  accept.onclick = () => decideSuggestions([suggestion.id], true);
+  const reject = document.createElement('button');
+  reject.className = 'ai__reject';
+  reject.textContent = suggestion.problem ? 'Descartar' : 'Rejeitar';
+  reject.onclick = () => decideSuggestions([suggestion.id], false);
+  actions.append(accept, reject);
+  card.append(actions);
+
+  const anchor = wrapper.querySelector('.block__suspect') || wrapper.querySelector('.block__mark');
+  anchor.after(card);
+}
+
+// Aceita ou rejeita. Aceitar pode mexer em capítulos inteiros: o servidor
+// devolve o livro, e a bancada é redesenhada.
+async function decideSuggestions(ids, accept) {
+  if (!ids.length || !state.project) return;
+  await flushSaves();
+  await sendDecision(`/review/${accept ? 'accept' : 'reject'}`, { ids });
+}
+
+async function acceptGroup(op) {
+  await flushSaves();
+  const body = { min_confidence: reviewThreshold() };
+  if (op) body.op = op;
+  await sendDecision('/review/accept-all', body);
+}
+
+async function sendDecision(path, body) {
+  try {
+    const outcome = await api(`/api/projects/${state.project.id}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (outcome.document) {
+      state.doc = outcome.document;
+      if (!currentChapter()) state.chapterId = state.doc.chapters[0]?.id || null;
+    }
+    if (outcome.project) state.project = outcome.project;
+    if (outcome.document) {
+      renderRail();
+      renderEditor();
+      refreshPreview();
+    }
+    updateStat();
+    await loadReview();
+    loadSuspects();
+    toast(decisionNote(outcome));
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+
+function decisionNote({ accepted = [], rejected = [], stale = [] }) {
+  const parts = [];
+  if (accepted.length) parts.push(`${accepted.length} ${accepted.length === 1 ? 'aplicada' : 'aplicadas'}`);
+  if (rejected.length) parts.push(`${rejected.length} ${rejected.length === 1 ? 'rejeitada' : 'rejeitadas'}`);
+  if (stale.length) {
+    parts.push(`${stale.length} não ${stale.length === 1 ? 'pôde' : 'puderam'} ser ${stale.length === 1 ? 'aplicada' : 'aplicadas'}: o livro mudou desde a revisão`);
+  }
+  return parts.length ? `${parts.join(' · ')}.` : 'Nenhuma sugestão pendente nesse grupo.';
+}
+
+/* Painel: as pendentes por operação, com "aceitar todas" do grupo. */
+
+function openReviewSheet() {
+  $('reviewThreshold').value = String(reviewThreshold());
+  renderReviewSheet();
+  $('reviewSheet').hidden = false;
+}
+
+function closeReviewSheet() {
+  $('reviewSheet').hidden = true;
+}
+
+function blockById(blockId) {
+  for (const chapter of state.doc?.chapters || []) {
+    const block = chapter.blocks.find((b) => b.id === blockId);
+    if (block) return block;
+  }
+  return null;
+}
+
+function renderReviewSheet() {
+  const review = state.review;
+  const threshold = reviewThreshold();
+  const pending = pendingSuggestions();
+
+  const when = review.reviewed_at ? new Date(review.reviewed_at).toLocaleString('pt-BR') : '';
+  $('reviewMeta').textContent = review.reviewed_at
+    ? `Revisado com ${review.model || review.provider} em ${when}. Nada muda no livro sem você aceitar.`
+    : 'Nenhuma revisão ainda. Use "Revisar com IA" na barra de cima.';
+
+  const groups = $('reviewGroups');
+  groups.innerHTML = '';
+  if (!pending.length && review.reviewed_at) {
+    const empty = document.createElement('p');
+    empty.className = 'review-sheet__empty';
+    empty.textContent = 'Nenhuma sugestão pendente.';
+    groups.append(empty);
+  }
+
+  for (const op of OP_ORDER) {
+    const items = pending.filter((s) => s.op === op);
+    if (!items.length) continue;
+    const eligible = items.filter((s) => !s.problem && s.confidence >= threshold);
+
+    const group = document.createElement('section');
+    group.className = 'review-group';
+    const head = document.createElement('div');
+    head.className = 'review-group__head';
+    const name = document.createElement('b');
+    name.textContent = `${OP_LABELS[op]} · ${items.length}`;
+    const accept = document.createElement('button');
+    accept.className = 'btn';
+    accept.textContent = eligible.length ? `Aceitar ${eligible.length}` : 'Nenhuma acima do limite';
+    accept.disabled = !eligible.length;
+    accept.onclick = () => acceptGroup(op);
+    head.append(name, accept);
+    group.append(head);
+
+    const list = document.createElement('ul');
+    list.className = 'review-group__list';
+    for (const suggestion of items) {
+      const block = blockById(suggestion.block_id);
+      const item = document.createElement('li');
+      const go = document.createElement('button');
+      go.className = 'review-item';
+      go.title = 'Ir para o trecho';
+      go.onclick = () => { closeReviewSheet(); goToBlock(suggestion.block_id); };
+      const text = document.createElement('span');
+      text.className = 'review-item__text';
+      text.textContent = (block?.text || '(bloco não existe mais)').replace(/<[^>]+>/g, '').slice(0, 90);
+      const detail = document.createElement('span');
+      detail.className = 'review-item__detail';
+      detail.textContent = [percent(suggestion.confidence), suggestion.problem || suggestion.reason]
+        .filter(Boolean).join(' · ');
+      if (suggestion.problem || suggestion.confidence < threshold) item.dataset.below = 'true';
+      go.append(text, detail);
+      item.append(go);
+      list.append(item);
+    }
+    group.append(list);
+    groups.append(group);
+  }
+
+  const eligible = pending.filter((s) => !s.problem && s.confidence >= threshold).length;
+  $('reviewAcceptAll').textContent = eligible ? `Aceitar todas (${eligible})` : 'Aceitar todas';
+  $('reviewAcceptAll').disabled = !eligible;
+  $('reviewRejectAll').disabled = !pending.length;
+
+  const decided = review.suggestions.filter((s) => s.status !== 'pending');
+  const count = (status) => decided.filter((s) => s.status === status).length;
+  const done = [
+    count('accepted') && `${count('accepted')} aceitas`,
+    count('rejected') && `${count('rejected')} rejeitadas`,
+    count('stale') && `${count('stale')} que o livro já não permitia`,
+  ].filter(Boolean);
+  $('reviewDone').textContent = done.length ? `Já decididas: ${done.join(', ')}.` : '';
 }
 
 /* ------------------------------------------------------------ salvamento */
@@ -2350,6 +2790,22 @@ function wire() {
 
   $('homeBtn').onclick = goHome;
   $('translateBtn').onclick = startTranslation;
+  $('reviewBtn').onclick = startReview;
+  $('reviewStop').onclick = stopReview;
+  $('closeReview').onclick = closeReviewSheet;
+  $('reviewSheet').onclick = (event) => { if (event.target === $('reviewSheet')) closeReviewSheet(); };
+  $('reviewThreshold').onchange = () => {
+    state.reviewThreshold = Number($('reviewThreshold').value);
+    try { localStorage.setItem(THRESHOLD_KEY, $('reviewThreshold').value); } catch { /* fica só agora */ }
+    renderReviewSheet();
+  };
+  $('reviewAcceptAll').onclick = () => acceptGroup(null);
+  $('reviewRejectAll').onclick = () => {
+    const ids = pendingSuggestions().map((s) => s.id);
+    if (ids.length && confirm(`Rejeitar as ${ids.length} sugestões pendentes? Elas não voltam numa nova revisão.`)) {
+      decideSuggestions(ids, false);
+    }
+  };
   $('stageConvert').onclick = () => setStage('convert');
   $('stageTranslate').onclick = () => setStage('translate');
 
