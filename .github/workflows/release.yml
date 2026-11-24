@@ -1,0 +1,167 @@
+name: Release
+
+# Uma versão nasce de uma tag:
+#
+#   git tag v0.2.0 && git push origin v0.2.0
+#
+# O pipeline confere a versão, roda os testes, publica as imagens no GitHub
+# Container Registry (amd64 e arm64) e cria o GitHub Release com a seção da
+# versão no CHANGELOG.md. O passo a passo está em docs/release.md.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag já existente para publicar de novo (ex.: v0.1.0)"
+        required: true
+
+permissions:
+  contents: write   # criar o GitHub Release
+  packages: write   # publicar no ghcr.io
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  release:
+    name: Publica ${{ github.event.inputs.tag || github.ref_name }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Confere a versão e extrai as notas do CHANGELOG
+        run: |
+          version="${TAG#v}"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          # O nome da imagem no ghcr.io precisa ser minúsculo.
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+          # Versão com sufixo (v0.2.0-rc.1) não vira "latest".
+          if [[ "$version" == *-* ]]; then echo "PRERELEASE=1" >> "$GITHUB_ENV"; fi
+
+          grep -q "^version = \"$version\"$" pyproject.toml \
+            || { echo "::error::pyproject.toml não está na versão $version"; exit 1; }
+          grep -q "version=\"$version\"" backend/app/main.py \
+            || { echo "::error::backend/app/main.py não está na versão $version"; exit 1; }
+
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > changelog-section.md
+          if ! grep -q '[^[:space:]]' changelog-section.md; then
+            echo "::error::CHANGELOG.md não tem a seção ## [$version]"
+            exit 1
+          fi
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      # Nada é publicado se os testes não passarem nesta tag.
+      - name: Testes
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: dev
+          tags: interlinear:dev
+          load: true
+          cache-from: type=gha,scope=dev
+      - run: docker run --rm interlinear:dev pytest -q
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags das imagens
+        run: |
+          plain="$IMAGE:$VERSION"
+          claude="$IMAGE:$VERSION-claude"
+          if [ -z "${PRERELEASE:-}" ]; then
+            plain="$plain,$IMAGE:latest"
+            claude="$claude,$IMAGE:claude"
+          fi
+          echo "TAGS_PLAIN=$plain" >> "$GITHUB_ENV"
+          echo "TAGS_CLAUDE=$claude" >> "$GITHUB_ENV"
+
+      - name: Imagem padrão
+        id: plain
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.TAGS_PLAIN }}
+          labels: |
+            org.opencontainers.image.title=Interlinear
+            org.opencontainers.image.description=Converte PDF em EPUB, edita e traduz com a IA de sua escolha.
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
+          cache-from: type=gha,scope=runtime
+
+      - name: Imagem com o Claude Code
+        id: claude
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          platforms: linux/amd64,linux/arm64
+          build-args: INTERLINEAR_WITH_CLAUDE=1
+          push: true
+          tags: ${{ env.TAGS_CLAUDE }}
+          labels: |
+            org.opencontainers.image.title=Interlinear (com Claude Code)
+            org.opencontainers.image.description=Interlinear com o Claude Code, para traduzir pela assinatura do Claude.
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
+
+      - name: Cria o GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIGEST_PLAIN: ${{ steps.plain.outputs.digest }}
+          DIGEST_CLAUDE: ${{ steps.claude.outputs.digest }}
+        run: |
+          {
+            cat changelog-section.md
+            echo
+            echo "## Instalação"
+            echo
+            echo "Precisa só do Docker. Numa pasta vazia:"
+            echo
+            echo '```bash'
+            echo "curl -fsSLO https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$TAG/compose.yaml"
+            echo "docker compose up -d"
+            echo '```'
+            echo
+            echo "Abra http://127.0.0.1:8000. Para a imagem com o Claude Code, ponha"
+            echo "\`INTERLINEAR_IMAGE_TAG=claude\` num arquivo \`.env\` ao lado do \`compose.yaml\`."
+            echo
+            echo "## Imagens"
+            echo
+            echo "| Imagem | Digest (sha256) |"
+            echo "| ------ | --------------- |"
+            echo "| \`$IMAGE:$VERSION\` | \`$DIGEST_PLAIN\` |"
+            echo "| \`$IMAGE:$VERSION-claude\` | \`$DIGEST_CLAUDE\` |"
+          } > release-notes.md
+
+          flags=()
+          if [ -n "${PRERELEASE:-}" ]; then flags+=(--prerelease); fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file release-notes.md
+          else
+            gh release create "$TAG" --title "Interlinear $VERSION" \
+              --notes-file release-notes.md --verify-tag "${flags[@]}"
+          fi
