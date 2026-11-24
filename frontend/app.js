@@ -40,6 +40,10 @@ const state = {
   previewTranslated: true,
   dirty: new Map(),
   saveTimer: null,
+  // Trechos que a conversão provavelmente errou (ver loadSuspects).
+  suspects: [],
+  suspectSeq: 0,
+  lastSuspect: null,
   // Importações em andamento, pelo id da tarefa (ou um id local enquanto o
   // arquivo ainda sobe).
   imports: new Map(),
@@ -613,6 +617,8 @@ async function openProject(projectId) {
     state.doc = data.document;
     state.chapterId = data.document.chapters[0]?.id || null;
     state.stage = initialStage(data.project);
+    state.suspects = [];
+    state.lastSuspect = null;
 
     $('start').hidden = true;
     for (const id of ['rail', 'editor', 'preview']) $(id).hidden = false;
@@ -624,6 +630,7 @@ async function openProject(projectId) {
     renderEditor();
     refreshPreview();
     updateStat();
+    loadSuspects();
     watchExistingJob(projectId);
   } catch (error) {
     toast(error.message, 'error');
@@ -635,6 +642,7 @@ function goHome() {
   stopPolling();
   state.project = null;
   state.doc = null;
+  state.suspects = [];
   $('start').hidden = false;
   for (const id of ['rail', 'editor', 'preview']) $(id).hidden = true;
   for (const id of ['homeBtn', 'translateBtn', 'exportBtn', 'bookBar', 'progress']) $(id).hidden = true;
@@ -669,6 +677,7 @@ function setStage(stage) {
   renderEditor();
   refreshPreview();
   updateStat();
+  loadSuspects();
 }
 
 function applyStage() {
@@ -724,8 +733,12 @@ function renderRail() {
     meta.className = 'chapter__meta';
     if (converting) {
       const blocks = chapter.blocks.length;
-      meta.textContent = [`${blocks} ${blocks === 1 ? 'bloco' : 'blocos'}`, chapterPages(chapter)]
-        .filter(Boolean).join(' · ');
+      const doubts = suspectBlocks(chapter.id).length;
+      meta.textContent = [
+        `${blocks} ${blocks === 1 ? 'bloco' : 'blocos'}`,
+        chapterPages(chapter),
+        doubts ? `${doubts} ${doubts === 1 ? 'duvidoso' : 'duvidosos'}` : '',
+      ].filter(Boolean).join(' · ');
       button.append(title, meta);
     } else {
       meta.textContent = total ? `${done}/${total} parágrafos` : 'sem texto';
@@ -814,6 +827,14 @@ function renderEditor() {
   }
   inner.append(note);
 
+  if (state.stage === 'convert') {
+    const doubts = document.createElement('p');
+    doubts.id = 'suspectNav';
+    doubts.className = 'editor__suspects';
+    inner.append(doubts);
+    renderSuspectNav();
+  }
+
   chapter.blocks.forEach((block, index) => {
     inner.append(renderBlock(block, chapter.blocks[index + 1]));
   });
@@ -867,12 +888,16 @@ function renderBlock(block, next) {
     img.className = 'block__source';
     img.textContent = `[imagem: ${block.src || 'sem arquivo'}]`;
     wrapper.append(img);
-    if (converting) wrapper.append(renderStructureTools(block, next, wrapper));
+    if (converting) {
+      wrapper.append(renderStructureTools(block, next, wrapper));
+      renderSuspectNote(block, wrapper);
+    }
     return wrapper;
   }
 
   if (converting) {
     wrapper.append(renderSourceEditor(block), renderStructureTools(block, next, wrapper));
+    renderSuspectNote(block, wrapper);
   } else {
     wrapper.dataset.state = blockState(block);
     renderTranslation(block, wrapper);
@@ -1108,6 +1133,102 @@ function renderStructureTools(block, next, wrapper) {
   return tools;
 }
 
+/* ------------------------------------------------------------- suspeitos */
+
+// Trechos que a conversão provavelmente errou: parágrafo partido, cabeçalho
+// que escapou, título longo demais (backend/app/core/review.py). Só na etapa
+// de conversão. O servidor recalcula depois de cada gravação, então corrigir
+// um trecho o tira da lista.
+
+async function loadSuspects() {
+  if (!state.project || state.stage !== 'convert') return;
+  const projectId = state.project.id;
+  const seq = ++state.suspectSeq;
+  let data;
+  try {
+    data = await api(`/api/projects/${projectId}/suspects`);
+  } catch {
+    return; // a marcação ajuda a revisar, mas não pode atrapalhar a edição
+  }
+  // Uma resposta atrasada (de outro livro ou de antes da última gravação) não vale.
+  if (seq !== state.suspectSeq || state.project?.id !== projectId) return;
+  state.suspects = data.suspects;
+  paintSuspects();
+  renderRail();
+}
+
+// Ids dos blocos duvidosos, na ordem de leitura e sem repetir.
+function suspectBlocks(chapterId = null) {
+  const ids = state.suspects
+    .filter((s) => s.block_id && (!chapterId || s.chapter_id === chapterId))
+    .map((s) => s.block_id);
+  return [...new Set(ids)];
+}
+
+function renderSuspectNote(block, wrapper) {
+  wrapper.querySelector('.block__suspect')?.remove();
+  const found = state.stage === 'convert'
+    ? state.suspects.filter((s) => s.block_id === block.id)
+    : [];
+  wrapper.dataset.suspect = String(found.length > 0);
+  if (!found.length) return;
+  const note = document.createElement('p');
+  note.className = 'block__suspect';
+  note.textContent = found.map((s) => s.message).join(' ');
+  wrapper.querySelector('.block__mark').after(note);
+}
+
+// Redesenha só as marcas, sem refazer o editor: quem está digitando não perde
+// o cursor quando a lista chega.
+function paintSuspects() {
+  for (const block of currentChapter()?.blocks || []) {
+    const wrapper = document.querySelector(`.block[data-id="${block.id}"]`);
+    if (wrapper) renderSuspectNote(block, wrapper);
+  }
+  renderSuspectNav();
+}
+
+function renderSuspectNav() {
+  const nav = $('suspectNav');
+  if (!nav) return;
+  nav.innerHTML = '';
+  const total = suspectBlocks().length;
+  nav.hidden = !total;
+  if (!total) return;
+  nav.append(
+    `${total} ${total === 1 ? 'trecho duvidoso' : 'trechos duvidosos'} no livro. `
+  );
+  const next = document.createElement('button');
+  next.className = 'editor__link';
+  next.textContent = 'Ir para o próximo';
+  next.onclick = nextSuspect;
+  nav.append(next);
+}
+
+function nextSuspect() {
+  const ids = suspectBlocks();
+  if (!ids.length) return;
+  const order = new Map(
+    state.doc.chapters.flatMap((c) => c.blocks.map((b) => b.id)).map((id, i) => [id, i])
+  );
+  // Continua de onde parou; se aquele bloco sumiu (juntado, apagado), recomeça.
+  const current = order.get(state.lastSuspect) ?? -1;
+  const target = ids.find((id) => (order.get(id) ?? -1) > current) || ids[0];
+  state.lastSuspect = target;
+
+  const chapter = state.doc.chapters.find((c) => c.blocks.some((b) => b.id === target));
+  if (!chapter) return;
+  if (chapter.id !== state.chapterId) selectChapter(chapter.id);
+  const wrapper = document.querySelector(`.block[data-id="${target}"]`);
+  if (!wrapper) return;
+  wrapper.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  wrapper.classList.remove('block--flash');
+  void wrapper.offsetWidth; // reinicia a animação num segundo clique
+  wrapper.classList.add('block--flash');
+  clearTimeout(wrapper.flashTimer);
+  wrapper.flashTimer = setTimeout(() => wrapper.classList.remove('block--flash'), 1600);
+}
+
 /* ------------------------------------------------------------ salvamento */
 
 function markDirty(block, clearing = false) {
@@ -1141,6 +1262,7 @@ async function flushSaves() {
     if (data.project) { state.project = data.project; updateStat(); }
     renderRail();
     refreshPreview();
+    loadSuspects();
   } catch (error) {
     toast(`Não foi possível salvar: ${error.message}`, 'error');
   }
@@ -1180,6 +1302,7 @@ async function splitHere(blockId) {
     state.doc = data.document;
     renderRail();
     renderEditor();
+    loadSuspects();
     toast('Capítulo dividido');
   } catch (error) {
     toast(error.message, 'error');
@@ -1203,6 +1326,7 @@ async function changeStructure(path, options, after) {
     renderRail();
     renderEditor();
     refreshPreview();
+    loadSuspects();
     after?.(data);
   } catch (error) {
     toast(error.message, 'error');

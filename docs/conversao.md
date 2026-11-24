@@ -308,6 +308,16 @@ Regras que custam zero:
 Essa marcação é também **a porta de entrada da IA**: os mesmos blocos marcados
 são exatamente os que vale a pena mandar para um modelo decidir.
 
+**Implementado** em `backend/app/core/review.py` (rota
+`GET /api/projects/{id}/suspects`). Na etapa de conversão, o bloco suspeito
+ganha uma borda pontilhada âmbar e uma linha dizendo o motivo; a lista de
+capítulos mostra quantos há em cada um, e "Ir para o próximo" leva de um ao
+outro. A lista é recalculada a cada gravação, então corrigir o trecho o tira
+dela. Os limites: título com mais de 18 palavras, bloco de até 2 caracteres,
+texto de até 12 palavras repetido em 3 páginas ou mais, capítulo com menos de
+150 palavras. A regra do hífen ainda não entra: a extração não registra
+quando juntou a palavra "na dúvida".
+
 ---
 
 ## 5. Onde a IA ajuda na conversão

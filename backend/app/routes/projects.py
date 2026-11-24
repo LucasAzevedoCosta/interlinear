@@ -21,6 +21,7 @@ from ..core.blocks import (
 )
 from ..core.epub_write import DEFAULT_CSS, chapter_to_xhtml, write_epub
 from ..core.importer import ImportOptions, import_file
+from ..core.review import find_suspects
 from ..core.storage import ProjectStore
 from ..deps import get_store
 from ..jobs import registry
@@ -174,6 +175,14 @@ async def get_chapter(project_id: str, chapter_id: str) -> dict[str, Any]:
     document = await _load(get_store(), project_id)
     chapter = _find_chapter(document, chapter_id)
     return {"chapter": chapter.to_dict()}
+
+
+@router.get("/{project_id}/suspects")
+async def list_suspects(project_id: str) -> dict[str, Any]:
+    """Os blocos que a conversão provavelmente errou (core/review.py)."""
+    document = await _load(get_store(), project_id)
+    suspects = await asyncio.to_thread(find_suspects, document)
+    return {"suspects": [s.to_dict() for s in suspects]}
 
 
 # --------------------------------------------------------------------------
