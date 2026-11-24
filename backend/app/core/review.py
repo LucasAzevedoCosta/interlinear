@@ -62,6 +62,9 @@ class Suspect:
     block_id: str | None
     reason: str
     message: str
+    # A evidência por trás do motivo, para o revisor IA ("também nas páginas
+    # 3, 5 e 7", "9 palavras"). Vazio quando o motivo já diz tudo.
+    detail: str = ""
 
     def to_dict(self) -> dict[str, str | None]:
         return asdict(self)
@@ -75,15 +78,15 @@ def find_suspects(document: Document) -> list[Suspect]:
     repeated = _repeated_blocks(document)
     suspects: list[Suspect] = []
 
-    def mark(chapter_id: str, block_id: str | None, reason: str) -> None:
-        suspects.append(Suspect(chapter_id, block_id, reason, MESSAGES[reason]))
+    def mark(chapter_id: str, block_id: str | None, reason: str, detail: str = "") -> None:
+        suspects.append(Suspect(chapter_id, block_id, reason, MESSAGES[reason], detail))
 
     for chapter in document.chapters:
         if len(document.chapters) > 1:
             words = sum(len(_plain(b.text).split()) for b in chapter.blocks)
             if words < SHORT_CHAPTER_WORDS:
                 first = chapter.blocks[0].id if chapter.blocks else None
-                mark(chapter.id, first, "short_chapter")
+                mark(chapter.id, first, "short_chapter", f"{words} palavras")
 
         for index, block in enumerate(chapter.blocks):
             text = _plain(block.text)
@@ -103,9 +106,20 @@ def find_suspects(document: Document) -> list[Suspect]:
             if block.kind in _PROSE and len(text) <= 2:
                 mark(chapter.id, block.id, "tiny_block")
             if block.id in repeated:
-                mark(chapter.id, block.id, "repeated_text")
+                mark(chapter.id, block.id, "repeated_text", repeated[block.id])
 
     return suspects
+
+
+def looks_continued(first: str, second: str) -> bool:
+    """Diz se o texto `second` pode continuar o `first` (parágrafo partido).
+
+    Os mesmos sinais que marcam os suspeitos: o primeiro termina sem fim de
+    frase, ou o segundo começa com minúscula. Sem nenhum dos dois, juntar
+    colaria dois parágrafos completos.
+    """
+    first, second = _plain(first), _plain(second)
+    return bool(first and second) and (not first.endswith(_CLOSING) or _starts_lowercase(second))
 
 
 def _plain(text: str) -> str:
@@ -131,8 +145,8 @@ def _repeat_key(text: str) -> str:
     return _SPACES.sub(" ", text).strip()
 
 
-def _repeated_blocks(document: Document) -> set[str]:
-    """Ids dos blocos curtos cujo texto se repete em páginas diferentes.
+def _repeated_blocks(document: Document) -> dict[str, str]:
+    """Blocos curtos cujo texto se repete em páginas diferentes: id → onde.
 
     O título que abre um capítulo fica de fora: "Capítulo 1", "Capítulo 2"…
     empatam sem os números, e estão certos.
@@ -156,9 +170,24 @@ def _repeated_blocks(document: Document) -> set[str]:
             pages[key].add(block.page if block.page is not None else block.id)
             ids[key].append(block.id)
 
-    return {
-        block_id
-        for key, found in pages.items()
-        if len(found) >= REPEATED_MIN_PAGES
-        for block_id in ids[key]
-    }
+    repeated: dict[str, str] = {}
+    for key, found in pages.items():
+        if len(found) < REPEATED_MIN_PAGES:
+            continue
+        numbers = sorted(page for page in found if isinstance(page, int))
+        where = (
+            f"repetido nas páginas {_listing(numbers)}"
+            if len(numbers) == len(found)
+            else f"repetido {len(found)} vezes"
+        )
+        for block_id in ids[key]:
+            repeated[block_id] = where
+    return repeated
+
+
+def _listing(numbers: list[int], limit: int = 8) -> str:
+    """[3, 5, 7] → "3, 5 e 7"; corta em `limit`."""
+    shown = [str(n) for n in numbers[:limit]]
+    if len(numbers) > limit:
+        return ", ".join(shown) + "…"
+    return shown[0] if len(shown) == 1 else ", ".join(shown[:-1]) + " e " + shown[-1]

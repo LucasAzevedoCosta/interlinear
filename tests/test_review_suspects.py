@@ -98,6 +98,9 @@ def test_cabecalho_repetido_em_varias_paginas():
     for head in heads:
         # Sem "fim aberto" junto: cabeçalho nunca termina em ponto.
         assert found[head.id] == {"repeated_text"}
+    # As páginas vão para o revisor IA como evidência.
+    details = {s.detail for s in find_suspects(doc(blocks)) if s.reason == "repeated_text"}
+    assert details == {"repetido nas páginas 3, 5 e 7"}
 
 
 def test_repeticao_na_mesma_pagina_ou_em_duas_nao_marca():
@@ -118,6 +121,7 @@ def test_capitulo_curto():
     suspects = [s for s in find_suspects(document) if s.reason == "short_chapter"]
     assert [s.chapter_id for s in suspects] == [document.chapters[0].id]
     assert suspects[0].block_id == short[0].id
+    assert suspects[0].detail == "3 palavras"
 
 
 def test_livro_de_um_capitulo_so_nao_e_curto():

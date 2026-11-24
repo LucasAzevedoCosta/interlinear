@@ -105,6 +105,21 @@ def test_casos_trazem_vizinhos_e_motivos():
     assert "TRECHO (parágrafo, página 2): frase pela quebra de página." in text
 
 
+def test_pedido_leva_titulo_do_livro_e_evidencia():
+    # O teste real mostrou o modelo tomando o cabeçalho corrente por título de
+    # capítulo quando só sabia "repetido em várias páginas".
+    heads = [Block("paragraph", "A CASA DO RIO", page=n) for n in (3, 5, 7)]
+    blocks = [Block("paragraph", LONG, page=1)]
+    for head in heads:
+        blocks += [head, Block("paragraph", LONG, page=head.page)]
+    document = Document(title="A casa do rio", chapters=[Chapter("C", blocks)])
+    provider = Scripted(lambda targets: "[]")
+    review(provider, document)
+    content = provider.requests[0][-1].content
+    assert content.startswith("Livro: A casa do rio\n")
+    assert "Motivo: texto repetido em várias páginas (repetido nas páginas 3, 5 e 7)" in content
+
+
 def test_contexto_corta_vizinhos_longos():
     document, _ = book()
     first = build_cases(document, find_suspects(document))[0]
@@ -176,8 +191,11 @@ def test_revisa_o_livro_e_nao_altera_o_documento():
     assert (result.total, result.reviewed, result.failed) == (3, 3, 0)
     assert [(p.block_id, p.op) for p in result.proposals] == [
         (blocks["partido"].id, "merge_next"),
-        (blocks["resto"].id, "merge_prev"),
         (blocks["numero"].id, "delete"),
+    ]
+    # As duas metades propuseram a mesma junção; a validação deixa uma.
+    assert [(r.proposal.block_id, r.proposal.op) for r in result.rejected] == [
+        (blocks["resto"].id, "merge_prev")
     ]
     assert result.usage.input_tokens == 10
 
@@ -191,7 +209,8 @@ def test_lote_fora_do_formato_refaz_um_a_um():
     provider = Scripted(answer)
     result = review(provider, document)
     assert len(provider.requests) == 4  # o lote + um pedido por trecho
-    assert [p.op for p in result.proposals] == ["merge_next", "merge_prev", "delete"]
+    assert result.reviewed == 3
+    assert [p.op for p in result.proposals] == ["merge_next", "delete"]
 
 
 def test_lotes_respeitam_o_orcamento():

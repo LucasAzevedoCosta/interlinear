@@ -9,8 +9,8 @@ livro; escolhe uma operação de uma lista fechada (juntar, trocar o tipo,
 apagar, corrigir uma letra…). Isso o impede de resumir, "melhorar" o estilo
 ou traduzir sem querer, e deixa cada decisão conferível.
 
-Nada é aplicado aqui. O resultado são propostas; a validação do conteúdo
-(Fase 3) e a aplicação com aceite do usuário (Fase 4) vêm depois.
+Nada é aplicado aqui. O resultado são propostas já validadas contra o livro
+(ai/review_validation.py); a aplicação com aceite do usuário vem depois.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ import httpx
 from ..core.blocks import Block, Document
 from ..core.review import Suspect
 from .base import Message, PlanLimitError, Provider, ProviderError, Usage
+from .review_validation import Rejection, validate
 from .translator import MAX_CONSECUTIVE_FAILURES, is_fatal, looks_like_refusal
 
 log = logging.getLogger(__name__)
@@ -71,7 +72,10 @@ partido pela quebra de página ou por uma figura).
 - "set_kind": o tipo está errado. Informe "kind": heading1, heading2, \
 heading3, paragraph, quote, list_item ou footnote.
 - "delete": o trecho não é do livro, é sobra da página: número de página, \
-cabeçalho ou rodapé corrente.
+cabeçalho ou rodapé corrente. Um texto curto repetido em várias páginas, \
+sobretudo o título do livro ou do capítulo, é cabeçalho corrente, mesmo em \
+caixa alta e mesmo antes de um parágrafo: não é título nem começo de \
+capítulo.
 - "fix_text": o texto tem erro de extração (palavra partida por hífen, \
 espaço sobrando ou faltando, letra trocada pelo OCR). Informe "text" com o \
 bloco inteiro corrigido. Corrija SÓ o erro de extração: não reescreva, não \
@@ -122,6 +126,8 @@ class Case:
     reasons: list[str]
     before: Block | None = None
     after: Block | None = None
+    # A evidência de cada motivo (Suspect.detail), na mesma ordem.
+    details: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -150,6 +156,8 @@ class ReviewResult:
     failed: int = 0
     total: int = 0
     usage: Usage = field(default_factory=Usage)
+    # Propostas bem formadas que a validação descartou (review_validation).
+    rejected: list[Rejection] = field(default_factory=list)
 
 
 ProgressCallback = Callable[[ReviewResult], None]
@@ -163,9 +171,11 @@ ProgressCallback = Callable[[ReviewResult], None]
 def build_cases(document: Document, suspects: Sequence[Suspect]) -> list[Case]:
     """Um caso por bloco suspeito, na ordem de leitura, com os vizinhos."""
     reasons: dict[str, list[str]] = {}
+    details: dict[str, list[str]] = {}
     for suspect in suspects:
         if suspect.block_id:
             reasons.setdefault(suspect.block_id, []).append(suspect.reason)
+            details.setdefault(suspect.block_id, []).append(suspect.detail)
 
     cases: list[Case] = []
     for chapter in document.chapters:
@@ -179,6 +189,7 @@ def build_cases(document: Document, suspects: Sequence[Suspect]) -> list[Case]:
                     reasons=reasons[block.id],
                     before=chapter.blocks[index - 1] if index > 0 else None,
                     after=chapter.blocks[index + 1] if index + 1 < len(chapter.blocks) else None,
+                    details=details[block.id],
                 )
             )
     return cases
@@ -220,7 +231,10 @@ def _neighbor(label: str, block: Block | None, *, tail: bool) -> str:
 
 
 def format_case(n: int, case: Case) -> str:
-    reasons = "; ".join(_REASON_NAMES.get(r, r) for r in case.reasons)
+    details = case.details or [""] * len(case.reasons)
+    reasons = "; ".join(
+        _REASON_NAMES.get(r, r) + (f" ({d})" if d else "") for r, d in zip(case.reasons, details)
+    )
     return "\n".join(
         [
             _MARKER.format(n=n),
@@ -338,6 +352,8 @@ class Reviewer:
         self.concurrency = concurrency
         self._client = client
         self._owns_client = client is None
+        # Título do livro revisado: um cabeçalho corrente costuma repeti-lo.
+        self.book_title = ""
 
     async def __aenter__(self) -> "Reviewer":
         if self._client is None:
@@ -357,11 +373,12 @@ class Reviewer:
 
     async def _ask(self, cases: Sequence[Case]) -> tuple[str, Usage]:
         listing = "\n\n".join(format_case(n, c) for n, c in enumerate(cases, start=1))
+        book = f"Livro: {self.book_title}\n" if self.book_title.strip() else ""
         messages = [
             Message(role="system", content=SYSTEM_PROMPT),
             Message(
                 role="user",
-                content=f"Revise os {len(cases)} trechos abaixo.\n\n{listing}",
+                content=f"{book}Revise os {len(cases)} trechos abaixo.\n\n{listing}",
             ),
         ]
         completion = await self.provider.complete_with_retry(messages, client=self.client)
@@ -410,6 +427,7 @@ class Reviewer:
         do plano) ou lotes seguidos falhando interrompem tudo e sobem como
         ProviderError; o que já foi revisado se perde, porque refazer é barato.
         """
+        self.book_title = document.title
         cases = build_cases(document, suspects)
         batches = build_batches(cases, max_chars=self.batch_chars)
         result = ReviewResult(total=len(cases))
@@ -468,4 +486,12 @@ class Reviewer:
             ) from exc
         order = {case.block.id: i for i, case in enumerate(cases)}
         result.proposals.sort(key=lambda p: order[p.block_id])
+        result.proposals, result.rejected = validate(document, result.proposals)
+        for rejection in result.rejected:
+            log.info(
+                "Proposta descartada (%s no bloco %s): %s",
+                rejection.proposal.op,
+                rejection.proposal.block_id,
+                rejection.reason,
+            )
         return result
