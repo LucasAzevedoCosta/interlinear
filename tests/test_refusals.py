@@ -50,7 +50,10 @@ def test_reconhece_recusa(reply):
         ("Desculpe, cheguei tarde.", "Sorry I'm late."),
         # O assunto sem a recusa: um livro sobre tradução.
         ("A tradução literária exige escolhas.", "Literary translation requires choices."),
-        ("Copyright © 2020. Todos os direitos reservados.", "Copyright © 2020. All rights reserved."),
+        (
+            "Copyright © 2020. Todos os direitos reservados.",
+            "Copyright © 2020. All rights reserved.",
+        ),
     ],
 )
 def test_traducao_normal_nao_e_recusa(reply, source):

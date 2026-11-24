@@ -116,9 +116,9 @@ def test_inserir_paragrafo_vazio_e_escrever_o_original(client, book):
 
 
 def test_inserir_fora_dos_limites_vai_para_a_ponta(client, book):
-    block = client.post(
-        f"/api/projects/{book}/chapters/c1/blocks", json={"index": 99}
-    ).json()["block"]
+    block = client.post(f"/api/projects/{book}/chapters/c1/blocks", json={"index": 99}).json()[
+        "block"
+    ]
     assert _ids(book)[-1] == block["id"]
 
 

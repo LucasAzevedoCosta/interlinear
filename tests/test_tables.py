@@ -49,8 +49,12 @@ def pdf(tmp_path_factory) -> Path:
     for x, label in ((X, "Peça"), (X + 140, "Ano"), (X + 220, "Preço")):
         c.drawString(x, y, label)
     c.setFont("Times-Roman", 10)
-    rows = [("Pêndulo de latão", "1931", "12,00"), ("Mola real", "1945", "3,50"),
-            ("Escape de âncora", "1902", "140,00"), ("Mostrador", "1931", "8,75")]
+    rows = [
+        ("Pêndulo de latão", "1931", "12,00"),
+        ("Mola real", "1945", "3,50"),
+        ("Escape de âncora", "1902", "140,00"),
+        ("Mostrador", "1931", "8,75"),
+    ]
     for row in rows:
         y -= LEADING
         c.drawString(X, y, row[0])
@@ -63,8 +67,12 @@ def pdf(tmp_path_factory) -> Path:
     # leitura em duas colunas.
     y = _prose(c, HEIGHT - 60)
     c.setFont("Times-Roman", 10)
-    for term, meaning in [("escape", "peça que solta"), ("mola", "guarda a força"),
-                          ("pêndulo", "marca o tempo"), ("coroa", "dá corda")]:
+    for term, meaning in [
+        ("escape", "peça que solta"),
+        ("mola", "guarda a força"),
+        ("pêndulo", "marca o tempo"),
+        ("coroa", "dá corda"),
+    ]:
         c.drawString(X, y, term)
         c.drawString(X + 170, y, meaning)
         y -= LEADING

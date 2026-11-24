@@ -33,7 +33,7 @@ from app.ai.providers import _reset_time, build_provider  # noqa: E402
 from app.ai.translator import TranslationSettings, Translator  # noqa: E402
 from app.core.blocks import Block  # noqa: E402
 
-FAKE_CLI = r'''#!{python}
+FAKE_CLI = r"""#!{python}
 import json, os, sys, time
 mode = os.environ.get("FAKE_MODE", "ok")
 log = os.environ["FAKE_LOG"]
@@ -59,7 +59,7 @@ is_error, result = results.get(mode, results["ok"])
 print(json.dumps({{"type": "result", "subtype": "success", "is_error": is_error, "result": result,
                   "api_error_status": None,
                   "usage": {{"input_tokens": 10, "cache_read_input_tokens": 5, "output_tokens": 7}}}}))
-'''
+"""
 
 
 @pytest.fixture
@@ -100,7 +100,9 @@ def test_traduz_pela_cli_isolada_e_sem_chave_de_api(cli):
     assert args[args.index("--system-prompt") + 1] == "Você é um tradutor."
     assert args[args.index("--tools") + 1] == ""
     assert args[args.index("--setting-sources") + 1] == ""
-    assert {"--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"} <= set(args)
+    assert {"--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"} <= set(
+        args
+    )
     assert call["stdin"] == "⟦1⟧\nHello."
     assert "interlinear-claude-" in call["cwd"]  # pasta vazia, sem CLAUDE.md
     assert call["api_key"] is False  # a chave do ambiente não chega à CLI
@@ -172,7 +174,10 @@ def test_sem_claude_code_instalado(tmp_path, monkeypatch):
 def test_hora_de_renovacao_pelo_texto():
     now = datetime(2026, 11, 12, 10, 0).timestamp()
     assert _reset_time("limit reached|1900000000", now) == 1900000000.0
-    assert _reset_time("5-hour limit reached ∙ resets 3pm", now) == datetime(2026, 11, 12, 15, 0).timestamp()
+    assert (
+        _reset_time("5-hour limit reached ∙ resets 3pm", now)
+        == datetime(2026, 11, 12, 15, 0).timestamp()
+    )
     assert _reset_time("resets at 9:30am", now) == datetime(2026, 11, 13, 9, 30).timestamp()
     assert _reset_time("limit reached, try later", now) is None
 

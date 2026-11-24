@@ -59,10 +59,15 @@ def test_imagens_so_sao_lidas_na_exportacao(client, monkeypatch):
     store = get_store()
     document = Document(
         title="Ilustrado",
-        chapters=[Chapter(title="Um", blocks=[
-            Block(kind="paragraph", text="Texto."),
-            Block(kind="image", src="figura.png"),
-        ])],
+        chapters=[
+            Chapter(
+                title="Um",
+                blocks=[
+                    Block(kind="paragraph", text="Texto."),
+                    Block(kind="image", src="figura.png"),
+                ],
+            )
+        ],
     )
     document.images["figura.png"] = b"\x89PNG-falso"
     project_id = store.create(document, source_kind="epub", source_filename="x.epub").id

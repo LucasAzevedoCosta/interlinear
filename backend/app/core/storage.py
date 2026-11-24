@@ -109,9 +109,7 @@ class ProjectStore:
             (self.images_dir(project_id) / _safe_name(name)).write_bytes(data)
 
         if source_bytes is not None and source_filename:
-            (self.source_dir(project_id) / _safe_name(source_filename)).write_bytes(
-                source_bytes
-            )
+            (self.source_dir(project_id) / _safe_name(source_filename)).write_bytes(source_bytes)
 
         now = _now()
         meta = ProjectMeta(

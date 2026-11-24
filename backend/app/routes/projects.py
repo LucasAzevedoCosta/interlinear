@@ -71,9 +71,7 @@ async def create_project(
     # Extrair um PDF leva de segundos a minutos de CPU. Fora do loop de eventos,
     # para que traduções em andamento e o resto da interface continuem respondendo.
     try:
-        document, summary = await asyncio.to_thread(
-            import_file, data, suffix, filename, options
-        )
+        document, summary = await asyncio.to_thread(import_file, data, suffix, filename, options)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:  # noqa: BLE001 - arquivos de terceiros
@@ -184,9 +182,7 @@ async def get_chapter(project_id: str, chapter_id: str) -> dict[str, Any]:
 
 
 @router.patch("/{project_id}/blocks")
-async def update_blocks(
-    project_id: str, payload: dict[str, Any] = Body(...)
-) -> dict[str, Any]:
+async def update_blocks(project_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """Aplica alterações a um ou mais blocos.
 
     Formato esperado:
@@ -250,6 +246,7 @@ async def update_chapter_titles(
     project_id: str, payload: dict[str, Any] = Body(...)
 ) -> dict[str, Any]:
     """Renomeia capítulos. Espera {"chapters": [{"id": "...", "title": "..."}]}."""
+
     def change(document: Document) -> int:
         by_id = {c.id: c for c in document.chapters}
         changed = 0
@@ -266,9 +263,7 @@ async def update_chapter_titles(
 
 
 @router.patch("/{project_id}")
-async def update_metadata(
-    project_id: str, payload: dict[str, Any] = Body(...)
-) -> dict[str, Any]:
+async def update_metadata(project_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """Atualiza título, autor e idiomas do livro."""
     store = get_store()
 
@@ -294,18 +289,14 @@ async def split_chapter(
 
     def change(document: Document) -> dict[str, Any]:
         chapter = _find_chapter(document, chapter_id)
-        position = next(
-            (i for i, b in enumerate(chapter.blocks) if b.id == block_id), None
-        )
+        position = next((i for i, b in enumerate(chapter.blocks) if b.id == block_id), None)
         if position is None or position == 0:
             raise HTTPException(400, "Bloco inválido para divisão")
 
         tail = chapter.blocks[position:]
         chapter.blocks = chapter.blocks[:position]
 
-        new_title = next(
-            (b.text for b in tail if b.kind.startswith("heading") and b.text), ""
-        )
+        new_title = next((b.text for b in tail if b.kind.startswith("heading") and b.text), "")
         new_chapter = Chapter(title=new_title or "Novo capítulo", blocks=tail)
 
         chapter_position = document.chapters.index(chapter)
@@ -318,6 +309,7 @@ async def split_chapter(
 @router.post("/{project_id}/chapters/{chapter_id}/merge")
 async def merge_chapter(project_id: str, chapter_id: str) -> dict[str, Any]:
     """Funde um capítulo com o anterior."""
+
     def change(document: Document) -> dict[str, Any]:
         chapter = _find_chapter(document, chapter_id)
         position = document.chapters.index(chapter)
@@ -372,6 +364,7 @@ async def merge_block_with_next(project_id: str, block_id: str) -> dict[str, Any
         vocabulary = Vocabulary.from_texts(
             text for block in document.all_blocks() for text in (block.text, block.translated or "")
         )
+
         def join(a: str, b: str) -> str:
             # Tabela partida na quebra de página: as linhas da segunda continuam
             # a primeira, sem mexer em hífen.
@@ -506,9 +499,7 @@ async def export_epub(
     document = await _load(store, project_id, with_images=True)
 
     suffix = "traduzido" if translated else "original"
-    safe_title = "".join(
-        c for c in document.title if c.isalnum() or c in " -_"
-    ).strip() or "livro"
+    safe_title = "".join(c for c in document.title if c.isalnum() or c in " -_").strip() or "livro"
     output = store.project_dir(project_id) / f"{safe_title} ({suffix}).epub"
 
     await asyncio.to_thread(write_epub, document, output, use_translation=translated)
@@ -527,20 +518,14 @@ async def export_epub(
 # thread para não segurar o loop de eventos.
 
 
-async def _load(
-    store: ProjectStore, project_id: str, *, with_images: bool = False
-) -> Document:
+async def _load(store: ProjectStore, project_id: str, *, with_images: bool = False) -> Document:
     try:
-        return await asyncio.to_thread(
-            store.load_document, project_id, with_images=with_images
-        )
+        return await asyncio.to_thread(store.load_document, project_id, with_images=with_images)
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(404, "Projeto não encontrado") from exc
 
 
-async def _update(
-    store: ProjectStore, project_id: str, change: Callable[[Document], T]
-) -> T:
+async def _update(store: ProjectStore, project_id: str, change: Callable[[Document], T]) -> T:
     """store.update com o 404 das rotas. Um HTTPException em `change` cancela a gravação."""
     try:
         return await asyncio.to_thread(store.update, project_id, change)

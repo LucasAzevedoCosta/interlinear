@@ -221,9 +221,7 @@ def _styled_line(text_line: LTTextLine) -> list[StyledChar]:
     letters = [item for item in text_line if isinstance(item, LTChar)]
     sizes = [round(item.size, 1) for item in letters]
     main = statistics.mode(sizes) if sizes else 0.0
-    baseline = min(
-        (item.y0 for item in letters if round(item.size, 1) == main), default=0.0
-    )
+    baseline = min((item.y0 for item in letters if round(item.size, 1) == main), default=0.0)
 
     chars: list[StyledChar] = []
     style = ""
@@ -376,9 +374,7 @@ def _color_channels(spec) -> int | None:
 
 def _encode_png(width: int, height: int, channels: int, raw: bytes) -> bytes:
     row = width * channels
-    scanlines = b"".join(
-        b"\x00" + raw[y * row : (y + 1) * row] for y in range(height)
-    )
+    scanlines = b"".join(b"\x00" + raw[y * row : (y + 1) * row] for y in range(height))
 
     def chunk(tag: bytes, data: bytes) -> bytes:
         crc = zlib.crc32(tag + data) & 0xFFFFFFFF
@@ -427,9 +423,7 @@ def _read_lines(
     if report is not None:
         report.pages = total
 
-    for page_number, page_layout in enumerate(
-        extract_pages(pdf_path, laparams=laparams), start=1
-    ):
+    for page_number, page_layout in enumerate(extract_pages(pdf_path, laparams=laparams), start=1):
         page_height = float(page_layout.height) or 1.0
         page_area = (float(page_layout.width) * page_height) or 1.0
         page_lines: list[Line] = []
@@ -625,13 +619,12 @@ def _reading_order(lines: list[Line], images: list[PageImage]) -> list[Line]:
     tables = _find_tables(lines)
     in_table = {id(line) for table in tables for line in table}
     text = [line for line in lines if id(line) not in in_table]
-    boxes = [
-        (min(c.top for c in t), min(c.x0 for c in t), max(c.x1 for c in t)) for t in tables
-    ]
+    boxes = [(min(c.top for c in t), min(c.x0 for c in t), max(c.x1 for c in t)) for t in tables]
 
     gutter = _find_gutter(text)
 
     if gutter is None:
+
         def key(top: float, x0: float, x1: float) -> tuple:
             return (top,)
     else:
@@ -765,9 +758,7 @@ class Footnote:
     lines: list[Line]
 
 
-def _split_footnotes(
-    lines: list[Line], body_size: float
-) -> tuple[list[Line], list[Footnote]]:
+def _split_footnotes(lines: list[Line], body_size: float) -> tuple[list[Line], list[Footnote]]:
     """Separa as notas de rodapé do corpo do texto.
 
     Em cada página, a zona de notas é o conjunto de linhas em fonte menor que
@@ -860,9 +851,7 @@ def _body_size(lines: list[Line]) -> float:
     return weights.most_common(1)[0][0]
 
 
-def _classify(
-    group: list[Line], body_size: float
-) -> str:
+def _classify(group: list[Line], body_size: float) -> str:
     """Decide se um grupo de linhas é título e de qual nível."""
     if not group:
         return "paragraph"
@@ -1176,6 +1165,7 @@ def _add_ocr_lines(
 
     # A imagem de uma página escaneada é a própria página, não uma figura.
     ocr_set = set(pages)
+
     def is_scan(page: int, share: float) -> bool:
         return page in ocr_set and (page not in with_text or share >= SCANNED_IMAGE_SHARE)
 

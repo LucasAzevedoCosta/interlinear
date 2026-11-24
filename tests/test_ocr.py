@@ -126,14 +126,25 @@ def test_margem_com_ruido_nao_perde_para_o_recuo():
         return Line(text, 11.0, False, False, x0, 300, top, 1, 595)
 
     lines = [
-        line(51.1, 100, "a"), line(66.5, 116, "b"), line(50.4, 132, "c"),
-        line(50.6, 148, "d"), line(66.2, 164, "e"), line(50.2, 180, "f"),
-        line(66.5, 196, "g"), line(50.4, 212, "h"), line(50.6, 228, "i"),
-        line(66.2, 244, "j"), line(50.2, 260, "k"),
+        line(51.1, 100, "a"),
+        line(66.5, 116, "b"),
+        line(50.4, 132, "c"),
+        line(50.6, 148, "d"),
+        line(66.2, 164, "e"),
+        line(50.2, 180, "f"),
+        line(66.5, 196, "g"),
+        line(50.4, 212, "h"),
+        line(50.6, 228, "i"),
+        line(66.2, 244, "j"),
+        line(50.2, 260, "k"),
     ]
     groups = _group_into_paragraphs(lines, 11.0)
     assert [[item.text for item in g] for g in groups] == [
-        ["a"], ["b", "c", "d"], ["e", "f"], ["g", "h", "i"], ["j", "k"],
+        ["a"],
+        ["b", "c", "d"],
+        ["e", "f"],
+        ["g", "h", "i"],
+        ["j", "k"],
     ]
 
 
@@ -163,8 +174,7 @@ def test_pdf_escaneado_passa_pelo_ocr(tmp_path):
         "uma a uma, sem pressa nenhuma de terminar o serviço daquela tarde."
     )
     assert texts[1] == (
-        "A menina voltou no dia seguinte e perguntou pelo pêndulo, que ainda "
-        "estava desmontado."
+        "A menina voltou no dia seguinte e perguntou pelo pêndulo, que ainda estava desmontado."
     )
     assert len(texts) == 4
     # A imagem da página escaneada não vira figura do livro.
@@ -173,6 +183,7 @@ def test_pdf_escaneado_passa_pelo_ocr(tmp_path):
 
 def test_corpo_do_ocr_vira_o_corpo_do_pdf():
     """Num PDF misto, o corpo do OCR se ajusta ao do texto do PDF, e o título acompanha."""
+
     def line(size: float) -> Line:
         return Line("x", size, False, False, 0, 10, 0, 1, 100)
 

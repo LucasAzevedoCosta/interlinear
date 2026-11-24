@@ -60,9 +60,7 @@ class FakeProvider(Provider):
         # Só o que é para traduzir: o contexto traz os blocos vizinhos.
         if any(text in body for text in self.refuse):
             return Completion(text=REFUSAL, usage=Usage(input_tokens=1, output_tokens=1))
-        reply = "\n\n".join(
-            f"⟦{n}⟧ [pt] {text.strip()}" for n, text in _SEGMENT_RE.findall(body)
-        )
+        reply = "\n\n".join(f"⟦{n}⟧ [pt] {text.strip()}" for n, text in _SEGMENT_RE.findall(body))
         return Completion(text=reply, usage=Usage(input_tokens=1, output_tokens=1))
 
     async def list_models(self, *, client) -> list[str]:
@@ -215,7 +213,9 @@ def test_apply_translations_respeita_edicao_feita_depois_de_gravar():
     initial = {"b1": None}
     written: dict[str, str | None] = {}
 
-    on_disk = Document(chapters=[Chapter(title="", blocks=[Block(kind="paragraph", text="Hello.", id="b1")])])
+    on_disk = Document(
+        chapters=[Chapter(title="", blocks=[Block(kind="paragraph", text="Hello.", id="b1")])]
+    )
     block.translated = "Olá."
     ai_routes._apply_translations(on_disk, [block], initial, written)
     assert on_disk.block_index()["b1"].translated == "Olá."
@@ -299,7 +299,9 @@ def test_traduzir_refaz_so_o_que_ficou_desatualizado(client, provider):
 def test_traducao_igual_a_anterior_tambem_tira_a_marca(client, provider):
     project_id, ids = _new_project(size=1)
     store = get_store()
-    store.update(project_id, lambda d: setattr(d.all_blocks()[0], "translated", "[pt] Paragraph 1."))
+    store.update(
+        project_id, lambda d: setattr(d.all_blocks()[0], "translated", "[pt] Paragraph 1.")
+    )
     store.update(project_id, lambda d: d.all_blocks()[0].meta.update(stale=True))
 
     assert _wait_job(client, _start(client, project_id))["status"] == "done"

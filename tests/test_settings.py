@@ -95,9 +95,7 @@ def test_preferencias_numericas_sao_limitadas(client):
 
 
 def test_glossario_ignora_termos_vazios(client):
-    response = client.put(
-        "/api/settings", json={"glossary": {"Shire": "Condado", "  ": "x"}}
-    )
+    response = client.put("/api/settings", json={"glossary": {"Shire": "Condado", "  ": "x"}})
     assert response.json()["settings"]["glossary"] == {"Shire": "Condado"}
 
 
@@ -136,6 +134,8 @@ def test_lista_modelos_com_a_chave_guardada_ao_editar(client, listed_keys):
 
     client.post("/api/providers/models", json={"kind": "openai", "provider_id": provider_id})
     # Trocar o serviço no formulário não leva a chave guardada para o outro.
-    client.post("/api/providers/models", json={"kind": "openai_compat", "provider_id": provider_id,
-                                               "base_url": "http://x/v1"})
+    client.post(
+        "/api/providers/models",
+        json={"kind": "openai_compat", "provider_id": provider_id, "base_url": "http://x/v1"},
+    )
     assert listed_keys == ["sk-secreta-1234", ""]

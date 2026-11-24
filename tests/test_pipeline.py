@@ -174,7 +174,7 @@ def test_inline_html_preserva_formatacao_permitida():
 
 
 def test_inline_html_neutraliza_marcacao_perigosa():
-    resultado = inline_html('texto <script>alert(1)</script> fim')
+    resultado = inline_html("texto <script>alert(1)</script> fim")
     assert "<script>" not in resultado
     assert "&lt;script&gt;" in resultado
 

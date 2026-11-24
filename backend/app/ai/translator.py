@@ -304,14 +304,13 @@ class Translator:
 
         messages = [self._system_message(), Message(role="user", content=user_content)]
 
-        completion = await self.provider.complete_with_retry(
-            messages, client=self.client
-        )
+        completion = await self.provider.complete_with_retry(messages, client=self.client)
         segments = _parse_segments(completion.text, len(batch))
 
         if segments is not None:
             refused = [
-                block for block, segment in zip(batch, segments)
+                block
+                for block, segment in zip(batch, segments)
                 if looks_like_refusal(segment, block.text)
             ]
             if not refused:
@@ -343,15 +342,12 @@ class Translator:
                     role="user",
                     content=(
                         "Traduza o texto a seguir. Responda apenas com a tradução, "
-                        "sem comentários, sem aspas ao redor e sem marcadores.\n\n"
-                        + block.text
+                        "sem comentários, sem aspas ao redor e sem marcadores.\n\n" + block.text
                     ),
                 ),
             ]
             try:
-                completion = await self.provider.complete_with_retry(
-                    messages, client=self.client
-                )
+                completion = await self.provider.complete_with_retry(messages, client=self.client)
                 usage = usage + completion.usage
                 text = _clean_single(completion.text)
                 if looks_like_refusal(text, block.text):
@@ -458,8 +454,7 @@ class Translator:
                             progress.current_note = f"Erro: {exc}"
                             consecutive_failures += 1
                             if not abort and (
-                                is_fatal(exc)
-                                or consecutive_failures >= MAX_CONSECUTIVE_FAILURES
+                                is_fatal(exc) or consecutive_failures >= MAX_CONSECUTIVE_FAILURES
                             ):
                                 abort.append(exc)
                             await _notify(on_progress, progress)
@@ -494,8 +489,7 @@ class Translator:
             if is_fatal(exc):
                 raise exc
             raise ProviderError(
-                f"{MAX_CONSECUTIVE_FAILURES} lotes seguidos falharam. "
-                f"Último erro: {exc}",
+                f"{MAX_CONSECUTIVE_FAILURES} lotes seguidos falharam. Último erro: {exc}",
                 status=exc.status,
             ) from exc
         return progress

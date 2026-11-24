@@ -107,9 +107,7 @@ def _blocks_from_xhtml(content: bytes, image_names: set[str]) -> list[Block]:
             src = element.get("src", "")
             name = posixpath.basename(src)
             if name:
-                blocks.append(
-                    Block(kind="image", src=name, text=element.get("alt", "") or "")
-                )
+                blocks.append(Block(kind="image", src=name, text=element.get("alt", "") or ""))
             continue
 
         kind = _BLOCK_MAP.get(tag)

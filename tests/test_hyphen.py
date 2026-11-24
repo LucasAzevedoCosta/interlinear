@@ -22,9 +22,9 @@ from app.core.pdf_extract import extract_blocks  # noqa: E402
     [
         # quebra de sílaba: some
         ("exem", "plo", False),
-        ("pe", "na", False),       # "-na" solto não é pronome aqui
+        ("pe", "na", False),  # "-na" solto não é pronome aqui
         ("pas", "se", False),
-        ("ex", "cesso", False),    # "ex" não entra como prefixo
+        ("ex", "cesso", False),  # "ex" não entra como prefixo
         ("sem", "pre", False),
         ("mal", "dade", False),
         # sem precisar do livro
@@ -43,10 +43,12 @@ def test_regras_sem_vocabulario(before, after, expected):
 
 
 def test_o_livro_decide_quando_tem_evidencia():
-    vocabulary = Vocabulary.from_texts([
-        "Abriu o <em>guarda-chuva</em> e disse-lhe adeus.",
-        "Não havia excesso nenhum, e a pena era leve.",
-    ])
+    vocabulary = Vocabulary.from_texts(
+        [
+            "Abriu o <em>guarda-chuva</em> e disse-lhe adeus.",
+            "Não havia excesso nenhum, e a pena era leve.",
+        ]
+    )
     assert keeps_hyphen("guarda", "chuva", vocabulary)
     assert keeps_hyphen("disse", "lhe", vocabulary)
     assert not keeps_hyphen("guarda", "chuva")  # sem o livro, na dúvida, junta

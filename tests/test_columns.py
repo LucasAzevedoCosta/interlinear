@@ -115,9 +115,14 @@ def test_paragrafo_continua_da_coluna_esquerda_para_a_direita(blocks):
 def test_titulo_largo_divide_a_pagina_em_faixas(blocks):
     page_two = [b for b in blocks if b.page == 2]
     assert _tags(page_two) == [
-        "C1", "C2", "D1", "IMG", "D2",
+        "C1",
+        "C2",
+        "D1",
+        "IMG",
+        "D2",
         "Uma seção que atravessa as colunas",
-        "E1", "F1",
+        "E1",
+        "F1",
     ]
     assert page_two[5].kind.startswith("heading")
 

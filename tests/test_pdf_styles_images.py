@@ -56,13 +56,18 @@ def pdf(tmp_path_factory) -> Path:
         if page == 0:
             c.setFont("Times-Bold", 20)
             c.drawString(40, height - 100, "Capítulo 1")
-            _styled_line(c, 40, height - 140, [
-                ("Times-Roman", "Ele leu "),
-                ("Times-Italic", "Dom Casmurro"),
-                ("Times-Roman", " duas vezes e achou "),
-                ("Times-Bold", "genial"),
-                ("Times-Roman", "."),
-            ])
+            _styled_line(
+                c,
+                40,
+                height - 140,
+                [
+                    ("Times-Roman", "Ele leu "),
+                    ("Times-Italic", "Dom Casmurro"),
+                    ("Times-Roman", " duas vezes e achou "),
+                    ("Times-Bold", "genial"),
+                    ("Times-Roman", "."),
+                ],
+            )
             c.drawImage(_picture((0, 120, 200)), 40, height - 290, 160, 100)  # PNG
             c.drawImage(_picture((90, 90, 90), size=(8, 8)), 40, height - 320, 12, 12)  # ornamento
             c.setFont("Times-Roman", 11)

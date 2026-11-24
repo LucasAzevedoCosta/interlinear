@@ -164,22 +164,40 @@ def test_paginas_em_trechos():
 
 def test_resumo_avisa_o_que_merece_conferir():
     words = " ".join(["palavra"] * 6000)
-    document = Document(chapters=[Chapter(title="Tudo", blocks=[
-        Block(kind="heading1", text="Tudo"),
-        Block(kind="paragraph", text=words),
-        Block(kind="footnote", text="1 Nota."),
-        Block(kind="table", text="a | b"),
-    ])])
+    document = Document(
+        chapters=[
+            Chapter(
+                title="Tudo",
+                blocks=[
+                    Block(kind="heading1", text="Tudo"),
+                    Block(kind="paragraph", text=words),
+                    Block(kind="footnote", text="1 Nota."),
+                    Block(kind="table", text="a | b"),
+                ],
+            )
+        ]
+    )
     report = ExtractionReport(
-        pages=40, ocr_pages=[3], scanned_without_ocr=[5, 6, 7], ocr_empty=[3],
+        pages=40,
+        ocr_pages=[3],
+        scanned_without_ocr=[5, 6, 7],
+        ocr_empty=[3],
         skipped_images=[12, 12],
     )
 
     summary = build_summary(document, report, ImportOptions(), 2.04)
 
     assert summary["pages"] == 40 and summary["ocr_pages"] == 1
-    assert (summary["headings"], summary["paragraphs"], summary["footnotes"], summary["tables"]) == (
-        1, 1, 1, 1,
+    assert (
+        summary["headings"],
+        summary["paragraphs"],
+        summary["footnotes"],
+        summary["tables"],
+    ) == (
+        1,
+        1,
+        1,
+        1,
     )
     assert summary["seconds"] == 2.0
     assert summary["warnings"] == [
@@ -187,13 +205,15 @@ def test_resumo_avisa_o_que_merece_conferir():
         "O OCR não achou texto na página 3.",
         "2 imagens ficaram de fora, num formato que o conversor não leva para o EPUB (página 12).",
         "O livro inteiro virou um capítulo só. Divida-o na etapa de conversão com "
-        "\"Começar capítulo aqui\", ou importe de novo separando os capítulos por "
+        '"Começar capítulo aqui", ou importe de novo separando os capítulos por '
         "outro nível de título.",
     ]
 
 
 def test_resumo_de_epub_nao_fala_de_paginas():
-    document = Document(chapters=[Chapter(title="Um", blocks=[Block(kind="paragraph", text="Oi.")])])
+    document = Document(
+        chapters=[Chapter(title="Um", blocks=[Block(kind="paragraph", text="Oi.")])]
+    )
     summary = build_summary(document, None, ImportOptions(), 0.1)
     assert summary["source_kind"] == "epub" and summary["pages"] is None
     assert summary["warnings"] == []
@@ -226,8 +246,13 @@ def test_conversao_recebe_so_pdf(client):
 
 def test_importar_para_traduzir_guarda_objetivo_idiomas_e_provedor(client):
     job = _start(
-        client, "livro.epub", _epub_bytes(),
-        purpose="translate", source_language="fr", target_language="pt-PT", provider_id="p1",
+        client,
+        "livro.epub",
+        _epub_bytes(),
+        purpose="translate",
+        source_language="fr",
+        target_language="pt-PT",
+        provider_id="p1",
     )
     assert job["purpose"] == "translate"
     job = _wait(client, job["id"])
@@ -247,8 +272,10 @@ def test_importar_para_traduzir_guarda_objetivo_idiomas_e_provedor(client):
 
 
 def test_importar_para_converter_nao_guarda_traducao(client, pdf_bytes):
-    job = _wait(client, _start(client, "livro.pdf", pdf_bytes, purpose="convert",
-                               source_language="fr")["id"])
+    job = _wait(
+        client,
+        _start(client, "livro.pdf", pdf_bytes, purpose="convert", source_language="fr")["id"],
+    )
     meta = client.get(f"/api/projects/{job['project_id']}").json()["project"]
     assert meta["purpose"] == "convert"
     assert meta["translation"] == {}
@@ -262,7 +289,9 @@ def test_sem_objetivo_epub_vai_para_traducao(client):
     assert response.json()["project"]["purpose"] == "translate"
 
 
-@pytest.mark.parametrize("form", [{"purpose": "ler"}, {"purpose": "translate", "target_language": "klingon"}])
+@pytest.mark.parametrize(
+    "form", [{"purpose": "ler"}, {"purpose": "translate", "target_language": "klingon"}]
+)
 def test_objetivo_e_idioma_invalidos(client, form):
     response = client.post(
         "/api/imports", files={"file": ("x.pdf", b"%PDF-1.4", "application/pdf")}, data=form

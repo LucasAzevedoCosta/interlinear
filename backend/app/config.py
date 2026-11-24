@@ -98,10 +98,7 @@ class Settings:
             source_language=data.get("source_language", "inglês"),
             target_language=data.get("target_language", "português brasileiro"),
             style_notes=data.get("style_notes", ""),
-            glossary={
-                str(k): str(v)
-                for k, v in (data.get("glossary") or {}).items()
-            },
+            glossary={str(k): str(v) for k, v in (data.get("glossary") or {}).items()},
             batch_chars=int(data.get("batch_chars", 3500)),
             concurrency=int(data.get("concurrency", 3)),
             context_blocks=int(data.get("context_blocks", 1)),

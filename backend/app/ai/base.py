@@ -114,9 +114,7 @@ class Provider(ABC):
         self.config = config
 
     @abstractmethod
-    async def complete(
-        self, messages: list[Message], *, client: httpx.AsyncClient
-    ) -> Completion:
+    async def complete(self, messages: list[Message], *, client: httpx.AsyncClient) -> Completion:
         """Envia as mensagens e devolve a resposta do modelo."""
 
     @abstractmethod
@@ -150,7 +148,10 @@ class Provider(ABC):
                     raise
                 log.warning(
                     "Tentativa %d/%d falhou (%s). Nova tentativa em %.1fs",
-                    attempt, attempts, exc, delay,
+                    attempt,
+                    attempts,
+                    exc,
+                    delay,
                 )
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 last_error = exc

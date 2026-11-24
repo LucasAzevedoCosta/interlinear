@@ -31,7 +31,9 @@ def test_hosts_locais_sao_aceitos(client, host):
     assert client.get("/api/health", headers={"Host": host}).status_code == 200
 
 
-@pytest.mark.parametrize("host", ["ataque.exemplo:8000", "ataque.exemplo", "127.0.0.1.ataque.exemplo"])
+@pytest.mark.parametrize(
+    "host", ["ataque.exemplo:8000", "ataque.exemplo", "127.0.0.1.ataque.exemplo"]
+)
 def test_host_estranho_e_recusado(client, host):
     # DNS rebinding: o domínio do atacante passou a apontar para 127.0.0.1.
     response = client.get("/api/settings", headers={"Host": host})

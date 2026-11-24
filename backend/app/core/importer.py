@@ -177,7 +177,7 @@ def build_summary(
     if len(document.chapters) == 1 and words >= SINGLE_CHAPTER_WORDS and options.split_on != "none":
         warnings.append(
             "O livro inteiro virou um capítulo só. Divida-o na etapa de conversão "
-            "com \"Começar capítulo aqui\", ou importe de novo separando os "
+            'com "Começar capítulo aqui", ou importe de novo separando os '
             "capítulos por outro nível de título."
         )
 

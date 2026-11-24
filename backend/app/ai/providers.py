@@ -64,6 +64,7 @@ def _epoch(value: Any) -> float:
             return 0.0
     return 0.0
 
+
 # --------------------------------------------------------------------------
 # Dialeto OpenAI
 # --------------------------------------------------------------------------
@@ -85,9 +86,7 @@ class OpenAICompatProvider(Provider):
         headers.update(self.config.extra_headers)
         return headers
 
-    async def complete(
-        self, messages: list[Message], *, client: httpx.AsyncClient
-    ) -> Completion:
+    async def complete(self, messages: list[Message], *, client: httpx.AsyncClient) -> Completion:
         payload: dict[str, Any] = {
             "model": self.config.model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
@@ -134,15 +133,19 @@ class OpenAICompatProvider(Provider):
         items = data.get("data") if isinstance(data, dict) else data
         if not isinstance(items, list):
             return []
-        return newest_first([
-            ModelInfo(
-                id=str(item["id"]),
-                name=str(item.get("name") or ""),  # OpenRouter dá o nome
-                created=_epoch(item.get("created")),
-            )
-            for item in items
-            if isinstance(item, dict) and item.get("id") and not _NOT_TEXT.search(str(item["id"]))
-        ])
+        return newest_first(
+            [
+                ModelInfo(
+                    id=str(item["id"]),
+                    name=str(item.get("name") or ""),  # OpenRouter dá o nome
+                    created=_epoch(item.get("created")),
+                )
+                for item in items
+                if isinstance(item, dict)
+                and item.get("id")
+                and not _NOT_TEXT.search(str(item["id"]))
+            ]
+        )
 
 
 class OllamaProvider(OpenAICompatProvider):
@@ -206,9 +209,7 @@ class AnthropicProvider(Provider):
         headers.update(self.config.extra_headers)
         return headers
 
-    async def complete(
-        self, messages: list[Message], *, client: httpx.AsyncClient
-    ) -> Completion:
+    async def complete(self, messages: list[Message], *, client: httpx.AsyncClient) -> Completion:
         system_parts = [m.content for m in messages if m.role == "system"]
         turns = [
             {"role": m.role, "content": m.content}
@@ -261,15 +262,17 @@ class AnthropicProvider(Provider):
         if response.status_code >= 400:
             raise ProviderError(_error_text(response), status=response.status_code)
         data = response.json().get("data", [])
-        return newest_first([
-            ModelInfo(
-                id=str(m["id"]),
-                name=str(m.get("display_name") or ""),
-                created=_epoch(m.get("created_at")),
-            )
-            for m in data
-            if isinstance(m, dict) and m.get("id")
-        ])
+        return newest_first(
+            [
+                ModelInfo(
+                    id=str(m["id"]),
+                    name=str(m.get("display_name") or ""),
+                    created=_epoch(m.get("created_at")),
+                )
+                for m in data
+                if isinstance(m, dict) and m.get("id")
+            ]
+        )
 
 
 # --------------------------------------------------------------------------
@@ -286,9 +289,7 @@ class GoogleProvider(Provider):
     def base_url(self) -> str:
         return (self.config.base_url or self.default_base_url).rstrip("/")
 
-    async def complete(
-        self, messages: list[Message], *, client: httpx.AsyncClient
-    ) -> Completion:
+    async def complete(self, messages: list[Message], *, client: httpx.AsyncClient) -> Completion:
         system_parts = [m.content for m in messages if m.role == "system"]
         contents = [
             {
@@ -307,9 +308,7 @@ class GoogleProvider(Provider):
             },
         }
         if system_parts:
-            payload["systemInstruction"] = {
-                "parts": [{"text": "\n\n".join(system_parts)}]
-            }
+            payload["systemInstruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
 
         model = self.config.model.removeprefix("models/")
         response = await client.post(
@@ -450,7 +449,9 @@ class ClaudeCliProvider(Provider):
             if key not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
         }
 
-    async def _run(self, args: list[str], stdin: str = "", timeout: float = 30.0) -> tuple[int, str, str]:
+    async def _run(
+        self, args: list[str], stdin: str = "", timeout: float = 30.0
+    ) -> tuple[int, str, str]:
         with tempfile.TemporaryDirectory(prefix="interlinear-claude-") as folder:
             process = await asyncio.create_subprocess_exec(
                 self._executable(),
@@ -488,9 +489,7 @@ class ClaudeCliProvider(Provider):
         """A conta em que o Claude Code está logado: plano e forma de login."""
         data = await self.auth_status()
         if not data.get("loggedIn"):
-            raise ProviderError(
-                f"O Claude Code não está logado. {claude_login_hint()}", fatal=True
-            )
+            raise ProviderError(f"O Claude Code não está logado. {claude_login_hint()}", fatal=True)
         if data.get("authMethod") != "claude.ai":
             raise ProviderError(
                 "O Claude Code está entrando com chave de API, não com a assinatura. "
@@ -500,9 +499,7 @@ class ClaudeCliProvider(Provider):
             )
         return {"plan": data.get("subscriptionType") or "", "method": data.get("authMethod")}
 
-    async def complete(
-        self, messages: list[Message], *, client: httpx.AsyncClient
-    ) -> Completion:
+    async def complete(self, messages: list[Message], *, client: httpx.AsyncClient) -> Completion:
         # Uma vez por tarefa: a conta não muda no meio de um livro.
         if not self._checked_account:
             await self.account()
@@ -513,11 +510,16 @@ class ClaudeCliProvider(Provider):
         code, out, err = await self._run(
             [
                 "-p",
-                "--output-format", "json",
-                "--model", self.model,
-                "--system-prompt", system,
-                "--tools", "",
-                "--setting-sources", "",
+                "--output-format",
+                "json",
+                "--model",
+                self.model,
+                "--system-prompt",
+                system,
+                "--tools",
+                "",
+                "--setting-sources",
+                "",
                 "--strict-mcp-config",
                 "--disable-slash-commands",
                 "--no-session-persistence",
@@ -533,8 +535,10 @@ class ClaudeCliProvider(Provider):
         if not isinstance(data, dict):
             raise _cli_error((err or out).strip() or f"Claude Code saiu com código {code}")
         if data.get("is_error") or data.get("subtype") != "success":
-            raise _cli_error(str(data.get("result") or err or data.get("subtype")),
-                             status=data.get("api_error_status"))
+            raise _cli_error(
+                str(data.get("result") or err or data.get("subtype")),
+                status=data.get("api_error_status"),
+            )
 
         usage = data.get("usage") or {}
         return Completion(

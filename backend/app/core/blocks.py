@@ -33,8 +33,14 @@ BlockKind = Literal[
 # Tipos cujo texto faz sentido traduzir.
 TRANSLATABLE: frozenset[str] = frozenset(
     {
-        "heading1", "heading2", "heading3", "paragraph", "quote", "list_item",
-        "footnote", "table",
+        "heading1",
+        "heading2",
+        "heading3",
+        "paragraph",
+        "quote",
+        "list_item",
+        "footnote",
+        "table",
     }
 )
 
@@ -115,11 +121,7 @@ class Document:
         return [b for ch in self.chapters for b in ch.blocks]
 
     def translatable_blocks(self) -> list[Block]:
-        return [
-            b
-            for b in self.all_blocks()
-            if b.kind in TRANSLATABLE and b.text.strip()
-        ]
+        return [b for b in self.all_blocks() if b.kind in TRANSLATABLE and b.text.strip()]
 
     def block_index(self) -> dict[str, Block]:
         return {b.id: b for b in self.all_blocks()}

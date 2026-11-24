@@ -107,9 +107,7 @@ async def upsert_provider(payload: dict[str, Any] = Body(...)) -> dict[str, Any]
         # lugar. Trocar o endereço sem redigitar a chave seria o jeito de
         # desviá-la para outro servidor.
         if existing.api_key and base_url.rstrip("/") != existing.base_url.rstrip("/"):
-            raise HTTPException(
-                400, "Ao trocar o endereço do provedor, digite a chave de novo"
-            )
+            raise HTTPException(400, "Ao trocar o endereço do provedor, digite a chave de novo")
         api_key = existing.api_key
 
     profile = ProviderProfile(
@@ -141,9 +139,7 @@ async def delete_provider(provider_id: str) -> dict[str, Any]:
     settings = store.load()
     settings.providers = [p for p in settings.providers if p.id != provider_id]
     if settings.active_provider_id == provider_id:
-        settings.active_provider_id = (
-            settings.providers[0].id if settings.providers else ""
-        )
+        settings.active_provider_id = settings.providers[0].id if settings.providers else ""
     store.save(settings)
     return {"settings": settings.redacted()}
 
@@ -294,14 +290,10 @@ async def start_translation(
 
     translation_settings = TranslationSettings(
         source_language=str(
-            payload.get("source_language")
-            or own.get("source_language")
-            or settings.source_language
+            payload.get("source_language") or own.get("source_language") or settings.source_language
         ),
         target_language=str(
-            payload.get("target_language")
-            or own.get("target_language")
-            or settings.target_language
+            payload.get("target_language") or own.get("target_language") or settings.target_language
         ),
         glossary={str(k): str(v) for k, v in glossary.items()},
         style_notes=str(payload.get("style_notes") or settings.style_notes),

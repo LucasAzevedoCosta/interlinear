@@ -72,9 +72,7 @@ class Job:
             "input_tokens": self.progress.usage.input_tokens,
             "output_tokens": self.progress.usage.output_tokens,
             "elapsed_seconds": round(self.elapsed, 1),
-            "eta_seconds": (
-                round(eta, 1) if (eta := self.eta_seconds()) is not None else None
-            ),
+            "eta_seconds": (round(eta, 1) if (eta := self.eta_seconds()) is not None else None),
             "error": self.error,
         }
 
@@ -175,9 +173,7 @@ class ImportJob:
             "error": self.error,
             "project_id": self.project_id,
             "elapsed_seconds": round((self.finished_at or time.time()) - self.started_at, 1),
-            "eta_seconds": (
-                round(eta, 1) if (eta := self.eta_seconds()) is not None else None
-            ),
+            "eta_seconds": (round(eta, 1) if (eta := self.eta_seconds()) is not None else None),
         }
 
 

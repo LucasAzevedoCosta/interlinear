@@ -52,7 +52,7 @@ Em `core/epub_write.py` isso aparece como:
 epub.writestr(
     zipfile.ZipInfo("mimetype"),
     "application/epub+zip",
-    compress_type=zipfile.ZIP_STORED,   # sem compressão, e escrito primeiro
+    compress_type=zipfile.ZIP_STORED,  # sem compressão, e escrito primeiro
 )
 ```
 

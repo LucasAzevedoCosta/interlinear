@@ -188,11 +188,7 @@ def _table_xhtml(text: str, anchor: str, *, header: bool) -> str:
     Linhas com menos células que a mais cheia são completadas com células
     vazias, para a tabela não sair torta se a tradução perder um "|".
     """
-    rows = [
-        [cell.strip() for cell in line.split("|")]
-        for line in text.split("\n")
-        if line.strip()
-    ]
+    rows = [[cell.strip() for cell in line.split("|")] for line in text.split("\n") if line.strip()]
     width = max(len(row) for row in rows)
     parts = [f'<table class="table"{anchor}>']
     for number, row in enumerate(rows):
@@ -392,9 +388,7 @@ def _content_opf(document: Document, filenames: list[str], language: str) -> str
 
     for i, image_name in enumerate(sorted(document.images), start=1):
         media = _IMAGE_TYPES.get(Path(image_name).suffix.lower(), "image/png")
-        manifest.append(
-            f'    <item id="img{i}" href="images/{image_name}" media-type="{media}"/>'
-        )
+        manifest.append(f'    <item id="img{i}" href="images/{image_name}" media-type="{media}"/>')
 
     modified = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     author = html.escape(document.author or "Desconhecido")
@@ -452,9 +446,7 @@ def write_epub(
         for chapter, name in zip(document.chapters, filenames):
             epub.writestr(
                 f"OEBPS/text/{name}",
-                chapter_to_xhtml(
-                    chapter, language=language, use_translation=use_translation
-                ),
+                chapter_to_xhtml(chapter, language=language, use_translation=use_translation),
             )
 
         for image_name, data in document.images.items():

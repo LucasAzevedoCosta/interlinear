@@ -119,4 +119,3 @@ if FRONTEND_DIR.exists():
     app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
 else:
     log.warning("Interface não encontrada em %s; servindo só a API", FRONTEND_DIR)
-

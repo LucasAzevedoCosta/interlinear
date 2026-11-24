@@ -68,8 +68,7 @@ CAPITULOS = [
             "certeza de que ia continuar.",
             "— Quanto é? — perguntou a menina.",
             "— Volta amanhã — disse Teodoro. — Ainda falta a parte difícil.",
-            "Ela voltou no dia seguinte, e no outro, e no outro. Ficou quatro "
-            "anos voltando.",
+            "Ela voltou no dia seguinte, e no outro, e no outro. Ficou quatro anos voltando.",
         ],
     ),
 ]

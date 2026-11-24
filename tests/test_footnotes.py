@@ -23,7 +23,9 @@ X = 40
 BODY, NOTE = 11, 8
 
 
-def _line(c: canvas.Canvas, y: float, runs: list[tuple[str, bool]], *, indent: bool = False) -> None:
+def _line(
+    c: canvas.Canvas, y: float, runs: list[tuple[str, bool]], *, indent: bool = False
+) -> None:
     """Uma linha de corpo; os trechos com True saem sobrescritos (chamada)."""
     text = c.beginText(X + (14 if indent else 0), y)
     for chunk, raised in runs:
@@ -58,8 +60,12 @@ def pdf(tmp_path_factory) -> Path:
     # página 2, e uma nota de duas linhas no pé.
     c.setFont("Times-Bold", 18)
     c.drawString(X, HEIGHT - 80, "Capítulo 1")
-    _line(c, HEIGHT - 120, [("O relojoeiro guardava o pêndulo", False), ("1", True),
-                            (" numa gaveta.", False)], indent=True)
+    _line(
+        c,
+        HEIGHT - 120,
+        [("O relojoeiro guardava o pêndulo", False), ("1", True), (" numa gaveta.", False)],
+        indent=True,
+    )
     _line(c, HEIGHT - 134, [("A menina voltou no dia seguinte e perguntou", False)], indent=True)
     _line(c, HEIGHT - 148, [("pelo relógio, que ainda estava desmontado sobre a", False)])
     _note(c, 70, "1", " Pêndulo de latão, do modelo que a fábrica deixou de")
@@ -68,8 +74,12 @@ def pdf(tmp_path_factory) -> Path:
 
     # Página 2: o parágrafo termina, outro traz duas chamadas, notas "*" e "2".
     _line(c, HEIGHT - 60, [("bancada, esperando a peça que faltava.", False)])
-    _line(c, HEIGHT - 74, [("Teodoro disse que era o modelo antigo", False), ("*", True),
-                           (" e que a peça", False)], indent=True)
+    _line(
+        c,
+        HEIGHT - 74,
+        [("Teodoro disse que era o modelo antigo", False), ("*", True), (" e que a peça", False)],
+        indent=True,
+    )
     _line(c, HEIGHT - 88, [("viria de Lisboa", False), ("2", True), (" no fim do mês.", False)])
     _note(c, 70, "*", " Nota do tradutor: o modelo de 1931.")
     _note(c, 60, "2", " A loja da Rua do Ouro.")
@@ -108,7 +118,9 @@ def test_notas_viram_blocos_com_marcador(blocks):
 def test_chamada_vira_sup(blocks):
     texts = [b.text for b in blocks]
     assert "O relojoeiro guardava o pêndulo<sup>1</sup> numa gaveta." in texts
-    assert any("modelo antigo<sup>*</sup> e que" in t and "Lisboa<sup>2</sup> no" in t for t in texts)
+    assert any(
+        "modelo antigo<sup>*</sup> e que" in t and "Lisboa<sup>2</sup> no" in t for t in texts
+    )
 
 
 def test_paragrafo_atravessa_a_pagina_por_cima_das_notas(blocks):
