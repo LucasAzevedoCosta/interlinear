@@ -2,3 +2,8 @@
 
 pytest>=8.0
 reportlab>=4.0   # gera o PDF de teste em tests/make_fixture.py
+
+# Qualidade e segurança, rodadas pela CI a cada push e pull request.
+ruff>=0.8        # linter
+pip-audit>=2.7   # vulnerabilidades conhecidas nas dependências
+bandit>=1.8      # padrões inseguros no código

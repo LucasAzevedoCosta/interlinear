@@ -1,5 +1,8 @@
 name: CI
 
+# O Interlinear só roda em container, e a CI também: tudo acontece dentro da
+# imagem `dev` do Dockerfile, a mesma do `docker compose run --rm dev`.
+
 on:
   push:
     branches: [main]
@@ -13,56 +16,58 @@ permissions:
   contents: read
 
 jobs:
-  testes:
-    name: Testes (${{ matrix.os }}, Python ${{ matrix.python }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        # 3.11 é o mínimo do pyproject.toml; 3.12 é a versão da imagem Docker.
-        os: [ubuntu-latest]
-        python: ["3.11", "3.12"]
-        # macOS e Windows rodam o app direto, sem Docker. Os testes de OCR
-        # se pulam sozinhos onde o Tesseract não está instalado.
-        include:
-          - os: macos-latest
-            python: "3.12"
-          - os: windows-latest
-            python: "3.12"
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python }}
-          cache: pip
-          cache-dependency-path: requirements*.txt
-
-      - name: Instala o Tesseract (OCR)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-por
-
-      - name: Instala dependências
-        run: pip install -r requirements-dev.txt
-
-      - name: Roda os testes
-        run: pytest -q
-
-  docker:
-    name: Imagem Docker
+  qualidade:
+    name: Testes, linter e segurança
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Constrói a imagem de desenvolvimento
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: dev
+          tags: interlinear:dev
+          load: true
+          cache-from: type=gha,scope=dev
+          cache-to: type=gha,mode=max,scope=dev
+
+      - name: Linter (ruff)
+        run: docker run --rm interlinear:dev ruff check --output-format=github .
+
+      - name: Testes (pytest)
+        run: docker run --rm interlinear:dev pytest -q
+
+      - name: Código (bandit)
+        run: docker run --rm interlinear:dev bandit -q -c pyproject.toml -r backend/app
+
+      - name: Dependências (pip-audit)
+        run: docker run --rm interlinear:dev pip-audit -r requirements.txt
+
+  imagem:
+    name: Imagem de produção
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
       - name: Constrói a imagem
-        run: docker build -t interlinear:ci .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          tags: interlinear:ci
+          load: true
+          cache-from: type=gha,scope=runtime
+          cache-to: type=gha,mode=max,scope=runtime
 
       - name: Sobe o container e confere o health
         run: |
           docker run -d --name interlinear -p 127.0.0.1:8000:8000 interlinear:ci
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             if curl -sf http://127.0.0.1:8000/api/health; then
               echo
               curl -sf -o /dev/null http://127.0.0.1:8000/ && echo "interface ok"
