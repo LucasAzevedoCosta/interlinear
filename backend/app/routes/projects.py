@@ -11,20 +11,15 @@ from typing import Any, Callable, TypeVar
 from fastapi import APIRouter, Body, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse, HTMLResponse, Response
 
-from ..core.blocks import (
-    TRANSLATABLE,
-    Block,
-    Chapter,
-    Document,
-    Vocabulary,
-    join_hyphenated,
-)
+from ..ai.review_apply import open_suspects
+from ..core import editing
+from ..core.blocks import Block, Chapter, Document
 from ..core.epub_write import DEFAULT_CSS, chapter_to_xhtml, write_epub
 from ..core.importer import ImportOptions, import_file
 from ..core.review import find_suspects
 from ..core.storage import ProjectStore
 from ..deps import get_store
-from ..jobs import registry
+from ..jobs import registry, review_registry
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -179,10 +174,16 @@ async def get_chapter(project_id: str, chapter_id: str) -> dict[str, Any]:
 
 @router.get("/{project_id}/suspects")
 async def list_suspects(project_id: str) -> dict[str, Any]:
-    """Os blocos que a conversão provavelmente errou (core/review.py)."""
-    document = await _load(get_store(), project_id)
+    """Os blocos que a conversão provavelmente errou (core/review.py).
+
+    Sem os que o usuário confirmou como certos na revisão por IA, enquanto o
+    texto deles não mudar.
+    """
+    store = get_store()
+    document = await _load(store, project_id)
+    review = await asyncio.to_thread(store.load_review, project_id)
     suspects = await asyncio.to_thread(find_suspects, document)
-    return {"suspects": [s.to_dict() for s in suspects]}
+    return {"suspects": [s.to_dict() for s in open_suspects(document, review, suspects)]}
 
 
 # --------------------------------------------------------------------------
@@ -222,21 +223,14 @@ async def update_blocks(project_id: str, payload: dict[str, Any] = Body(...)) ->
                 continue
 
             if "text" in update:
-                text = str(update["text"])
-                if text != block.text and block.translated:
-                    block.meta["stale"] = True
-                block.text = text
+                editing.set_text(block, str(update["text"]))
             if "translated" in update:
                 value = update["translated"]
                 block.translated = None if value is None else str(value)
                 block.meta.pop("stale", None)
                 block.meta.pop("refused", None)
             if "kind" in update and update["kind"]:
-                kind = str(update["kind"])
-                # Só entre tipos de texto: virar imagem pediria um arquivo.
-                if kind not in TRANSLATABLE or block.kind not in TRANSLATABLE:
-                    raise HTTPException(400, f"Tipo de bloco inválido: {kind}")
-                block.kind = kind  # type: ignore[assignment]
+                editing.set_kind(block, str(update["kind"]))
             if isinstance(update.get("meta"), dict):
                 # Mesclado, não substituído: o editor manda só o que mudou.
                 block.meta = {**block.meta, **update["meta"]}
@@ -297,19 +291,7 @@ async def split_chapter(
     block_id = str(payload.get("block_id", ""))
 
     def change(document: Document) -> dict[str, Any]:
-        chapter = _find_chapter(document, chapter_id)
-        position = next((i for i, b in enumerate(chapter.blocks) if b.id == block_id), None)
-        if position is None or position == 0:
-            raise HTTPException(400, "Bloco inválido para divisão")
-
-        tail = chapter.blocks[position:]
-        chapter.blocks = chapter.blocks[:position]
-
-        new_title = next((b.text for b in tail if b.kind.startswith("heading") and b.text), "")
-        new_chapter = Chapter(title=new_title or "Novo capítulo", blocks=tail)
-
-        chapter_position = document.chapters.index(chapter)
-        document.chapters.insert(chapter_position + 1, new_chapter)
+        editing.split_chapter(document, chapter_id, block_id)
         return document.to_dict()
 
     return {"document": await _update(get_store(), project_id, change)}
@@ -320,13 +302,7 @@ async def merge_chapter(project_id: str, chapter_id: str) -> dict[str, Any]:
     """Funde um capítulo com o anterior."""
 
     def change(document: Document) -> dict[str, Any]:
-        chapter = _find_chapter(document, chapter_id)
-        position = document.chapters.index(chapter)
-        if position == 0:
-            raise HTTPException(400, "Não há capítulo anterior para fundir")
-
-        document.chapters[position - 1].blocks.extend(chapter.blocks)
-        document.chapters.pop(position)
+        editing.merge_chapter(document, chapter_id)
         return document.to_dict()
 
     return {"document": await _update(get_store(), project_id, change)}
@@ -341,8 +317,7 @@ async def delete_block(project_id: str, block_id: str) -> dict[str, Any]:
     """Apaga um bloco. Devolve o bloco e a posição, para a interface desfazer."""
 
     def change(document: Document) -> dict[str, Any]:
-        chapter, index = _locate_block(document, block_id)
-        removed = chapter.blocks.pop(index)
+        chapter, removed, index = editing.delete_block(document, block_id)
         return {
             "chapter": chapter.to_dict(),
             "removed": {"block": removed.to_dict(), "index": index},
@@ -360,49 +335,7 @@ async def merge_block_with_next(project_id: str, block_id: str) -> dict[str, Any
     """
 
     def change(document: Document) -> dict[str, Any]:
-        chapter, index = _locate_block(document, block_id)
-        if index + 1 >= len(chapter.blocks):
-            raise HTTPException(400, "Não há bloco seguinte neste capítulo")
-        first, second = chapter.blocks[index], chapter.blocks[index + 1]
-        if first.kind not in TRANSLATABLE or first.kind != second.kind:
-            # Título com parágrafo não é um parágrafo partido; é estrutura.
-            raise HTTPException(400, "Só blocos de texto do mesmo tipo podem ser juntados")
-
-        # A tradução só sobrevive se as duas metades estavam traduzidas; meia
-        # tradução colada no texto inteiro passaria por pronta na revisão.
-        vocabulary = Vocabulary.from_texts(
-            text for block in document.all_blocks() for text in (block.text, block.translated or "")
-        )
-
-        def join(a: str, b: str) -> str:
-            # Tabela partida na quebra de página: as linhas da segunda continuam
-            # a primeira, sem mexer em hífen.
-            if first.kind == "table":
-                return f"{a.rstrip()}\n{b.lstrip()}"
-            return join_hyphenated(a, b, vocabulary)
-
-        translated = None
-        if first.translated and second.translated:
-            translated = join(first.translated, second.translated)
-
-        merged = Block(
-            kind=first.kind,
-            text=join(first.text, second.text),
-            translated=translated,
-            page=first.page,
-            meta={
-                **second.meta,
-                **first.meta,
-                "edited": bool(translated)
-                and bool(first.meta.get("edited") or second.meta.get("edited")),
-            },
-        )
-        merged.meta.pop("stale", None)
-        if translated and (first.meta.get("stale") or second.meta.get("stale")):
-            merged.meta["stale"] = True
-        # Id novo de propósito: uma tradução em andamento ainda tem a tradução
-        # de cada metade pendente pelo id antigo e não deve gravá-la aqui.
-        chapter.blocks[index : index + 2] = [merged]
+        chapter, merged = editing.merge_with_next(document, block_id)
         return {"chapter": chapter.to_dict(), "block": merged.to_dict()}
 
     return await _update_with_meta(get_store(), project_id, change)
@@ -426,7 +359,7 @@ async def insert_block(
         raise HTTPException(400, "Campo 'block' deve ser um objeto")
 
     def change(document: Document) -> dict[str, Any]:
-        chapter = _find_chapter(document, chapter_id)
+        chapter = editing.find_chapter(document, chapter_id)
         if data:
             block = Block.from_dict(data)
             if block.id in document.block_index():
@@ -442,11 +375,12 @@ async def insert_block(
 
 @router.delete("/{project_id}")
 async def delete_project(project_id: str) -> dict[str, Any]:
-    # Uma tradução em andamento continuaria pagando por lotes que não têm mais
-    # onde ser gravados.
-    job = registry.for_project(project_id)
-    if job is not None and job.status == "running":
-        job.cancel()
+    # Uma tradução ou revisão em andamento continuaria pagando por lotes que
+    # não têm mais onde ser gravados.
+    for jobs in (registry, review_registry):
+        job = jobs.for_project(project_id)
+        if job is not None and job.status == "running":
+            job.cancel()
 
     if not await asyncio.to_thread(get_store().delete, project_id):
         raise HTTPException(404, "Projeto não encontrado")
@@ -538,6 +472,8 @@ async def _update(store: ProjectStore, project_id: str, change: Callable[[Docume
     """store.update com o 404 das rotas. Um HTTPException em `change` cancela a gravação."""
     try:
         return await asyncio.to_thread(store.update, project_id, change)
+    except editing.EditError as exc:
+        raise HTTPException(exc.status, exc.message) from exc
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(404, "Projeto não encontrado") from exc
 
@@ -554,16 +490,9 @@ async def _update_with_meta(
     return result
 
 
-def _locate_block(document: Document, block_id: str) -> tuple[Chapter, int]:
-    for chapter in document.chapters:
-        for index, block in enumerate(chapter.blocks):
-            if block.id == block_id:
-                return chapter, index
-    raise HTTPException(404, "Bloco não encontrado")
-
-
 def _find_chapter(document: Document, chapter_id: str) -> Chapter:
-    chapter = next((c for c in document.chapters if c.id == chapter_id), None)
-    if chapter is None:
-        raise HTTPException(404, "Capítulo não encontrado")
-    return chapter
+    """Para as rotas de leitura, fora do _update que converte o EditError."""
+    try:
+        return editing.find_chapter(document, chapter_id)
+    except editing.NotFound as exc:
+        raise HTTPException(404, exc.message) from exc

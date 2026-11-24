@@ -80,6 +80,9 @@ class ProjectStore:
     def _meta_path(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "meta.json"
 
+    def _review_path(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "review.json"
+
     def images_dir(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "images"
 
@@ -171,6 +174,25 @@ class ProjectStore:
             self._write_meta(meta)
             return meta
 
+    def lock(self, project_id: str) -> threading.RLock:
+        """A trava do projeto, para quem precisa mudar documento e revisão juntos."""
+        return _lock_for(project_id)
+
+    def update_review(self, project_id: str, change: Callable[[dict[str, Any]], T]) -> T:
+        """Lê o review.json, aplica `change` e grava, sob a trava do projeto.
+
+        A revisão por IA fica fora do document.json: é sobre o livro, não parte
+        dele, e não pode pesar em cada salvamento automático do editor.
+        Levanta FileNotFoundError se o projeto não existe mais.
+        """
+        with _lock_for(project_id):
+            if not self._doc_path(project_id).exists():
+                raise FileNotFoundError(f"Projeto não encontrado: {project_id}")
+            review = self.load_review(project_id)
+            result = change(review)
+            _atomic_write_json(self._review_path(project_id), review)
+            return result
+
     def _write_meta(self, meta: ProjectMeta) -> None:
         _atomic_write_json(self._meta_path(meta.id), meta.to_dict())
 
@@ -196,6 +218,17 @@ class ProjectStore:
                     document.images[image.name] = image.read_bytes()
 
         return document
+
+    def load_review(self, project_id: str) -> dict[str, Any]:
+        """O review.json do projeto; vazio se ainda não houve revisão."""
+        path = self._review_path(project_id)
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text("utf-8"))
+        except json.JSONDecodeError:
+            return {}
+        return data if isinstance(data, dict) else {}
 
     def get_meta(self, project_id: str) -> ProjectMeta | None:
         path = self._meta_path(project_id)

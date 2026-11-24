@@ -80,14 +80,15 @@ class Job:
 class JobRegistry:
     """Guarda as tarefas em memória. Uma tarefa ativa por projeto."""
 
-    def __init__(self) -> None:
+    def __init__(self, busy: str = "Já existe uma tradução em andamento neste projeto") -> None:
         self._jobs: dict[str, Job] = {}
         self._by_project: dict[str, str] = {}
+        self._busy = busy
 
     def create(self, job_id: str, project_id: str, total: int) -> Job:
         existing = self.for_project(project_id)
         if existing and existing.status == "running":
-            raise ValueError("Já existe uma tradução em andamento neste projeto")
+            raise ValueError(self._busy)
 
         job = Job(id=job_id, project_id=project_id)
         job.progress.total = total
@@ -120,6 +121,10 @@ class JobRegistry:
 
 
 registry = JobRegistry()
+
+# Revisão da conversão por IA (routes/review.py). Registro próprio: revisar e
+# traduzir o mesmo livro ao mesmo tempo é permitido.
+review_registry = JobRegistry("Já existe uma revisão em andamento neste projeto")
 
 
 class ImportCancelled(Exception):
