@@ -11,7 +11,7 @@ provedor ativo.
 | Google Gemini | por token (tem camada gratuita) | chave de API |
 | Endpoint compatível (OpenRouter, DeepSeek, Groq…) | por token, no serviço | chave de API e endereço |
 | LM Studio, Ollama | nada: roda na sua máquina | o programa aberto, com um modelo |
-| **Claude pela assinatura** (experimental) | sai dos limites do seu plano Pro ou Max | Claude Code instalado e logado |
+| **Claude pela assinatura** (experimental) | sai dos limites do seu plano Pro ou Max | imagem `claude` e login no container |
 
 ## Claude pela assinatura (experimental)
 
@@ -44,27 +44,18 @@ uma chave de API). "Testar conexão" mostra o plano.
 quando vale o login e quando foi a última leitura, com um botão **Verificar
 agora**. Ela fica sempre à vista, independente do provedor selecionado.
 
-Fora do Docker, essa seção tem o botão **Entrar com a conta Claude**.
-Ele não faz o login: abre uma **janela de terminal desta máquina** rodando o
-`claude auth login` oficial — como um atalho na área de trabalho. O Claude Code
-abre a página da Anthropic no navegador, você autoriza, e o painel avisa
-sozinho quando a conta entrar. O link e o código ficam entre o Claude Code e a
-Anthropic; o Interlinear não recebe nada disso do navegador.
-
-Dá no mesmo rodar `./run.sh login` (ou `.\run.ps1 login` no Windows).
-
-Dentro do Docker o botão não aparece, e a seção diz isso com todas as letras:
-o container não alcança a sua área de trabalho, então lá o login é feito pelo
-próprio container, pela aba Exec (abaixo).
+O login é feito pelo próprio container, pela aba Exec do Docker Desktop
+(abaixo). A seção mostra os passos e avisa sozinha quando a conta entrar.
 
 A lista de provedores repete o estado numa bolinha ao lado do modelo
 ("conectado" / "não conectado"), para dar para ver sem rolar a página.
 
-### Com Docker
+### Como ativar
 
-1. No arquivo `.env` ao lado do `compose.yaml`, ponha
-   `INTERLINEAR_WITH_CLAUDE=1`, e reconstrua: `docker compose up -d --build`.
-   A imagem passa a trazer o Claude Code (~350 MB a mais).
+1. Use a imagem que traz o Claude Code (~350 MB a mais): no arquivo `.env` ao
+   lado do `compose.yaml`, ponha `INTERLINEAR_IMAGE_TAG=claude` e rode
+   `docker compose up -d`. Construindo do código, ponha
+   `INTERLINEAR_WITH_CLAUDE=1` e rode `docker compose up -d --build`.
 2. Abra **Configurações**: a seção **Claude pela assinatura**, no alto, diz
    se o Claude Code está logado.
 3. Se não estiver, entre **uma vez**: no Docker Desktop, abra
@@ -83,22 +74,9 @@ container: reconstruir a imagem traz a versão nova.
 **Por que o login não é feito dentro da página do Interlinear?** Porque aí o
 Interlinear teria de repassar o link e o código de autorização, e a Anthropic
 proíbe que terceiros ofereçam o login do Claude.ai ou intermediem credenciais.
-O login acontece só no Claude Code, pelo fluxo da Anthropic; a página dá a
-partida no binário oficial (o botão **Entrar com a conta Claude**, fora do
-Docker) e lê o `claude auth status` (logado, plano, validade), nunca o token.
-Dar a partida num programa é diferente de intermediar o que ele recebe: o
-código de autorização é digitado na janela do terminal, que é sua, e o
-Interlinear não tem como vê-lo.
-
-### Sem Docker
-
-1. [Claude Code](https://claude.com/claude-code) instalado.
-2. O Interlinear rodando direto na máquina, com Python 3.11 ou mais novo
-   (veja "Instalação" no README).
-3. Em **Configurações**, na seção "Claude pela assinatura", clique em
-   **Entrar com a conta Claude**. Nada de terminal: o botão abre a janela e
-   o navegador por você.
-4. Se o `claude` não estiver no `PATH`, aponte `INTERLINEAR_CLAUDE` para ele.
+O login acontece só no Claude Code, pelo fluxo da Anthropic, digitado por
+você no Exec do container; a página só lê o `claude auth status` (logado,
+plano, validade), nunca o token.
 
 ### Cadastro
 

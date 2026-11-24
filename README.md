@@ -52,137 +52,61 @@ exportação, então o que aparece na tela é exatamente o que vai para o arquiv
 | Por que converter PDF é difícil, limitações, papel do preview, custos de IA | [docs/conversao.md](docs/conversao.md) |
 | Licenças das dependências e a armadilha do AGPL | [docs/licencas.md](docs/licencas.md) |
 | Provedores de IA, inclusive o Claude pela assinatura (experimental) | [docs/provedores.md](docs/provedores.md) |
+| Variáveis de ambiente, dados, IA local, rede, OCR em outros idiomas | [docs/configuracao.md](docs/configuracao.md) |
+| Arquitetura e uso do conversor como biblioteca | [docs/guia.md](docs/guia.md#arquitetura) |
+| Como sai uma versão | [docs/release.md](docs/release.md) |
+| O que mudou em cada versão | [CHANGELOG.md](CHANGELOG.md) |
 
 Abrindo o projeto pela primeira vez, comece pelo [guia](docs/guia.md).
 
 ## Instalação
 
-Funciona em Windows, macOS e Linux. Há dois caminhos:
+Precisa só do Docker: [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+no Windows e no Mac, Docker Engine no Linux. O Interlinear roda inteiro dentro
+do container, com o OCR já incluído; nada é instalado no seu computador.
 
-| Caminho | Bom para | Precisa de |
-| ------- | -------- | ---------- |
-| [Docker](#com-docker-recomendado) | Quem só quer usar: OCR já incluído, nada a instalar além do Docker | [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows e Mac) ou Docker Engine (Linux) |
-| [Python](#com-python) | Quem quer modificar o código, ou não quer o Docker | Python 3.11 ou mais recente e, para PDFs escaneados, o Tesseract |
+Numa pasta vazia, baixe o `compose.yaml` e suba:
 
-Nos dois casos, comece baixando o código:
+```bash
+curl -fsSLO https://raw.githubusercontent.com/LucasAzevedoCosta/interlinear/main/compose.yaml
+docker compose up -d
+```
+
+Abra `http://127.0.0.1:8000`. A porta é publicada só em `127.0.0.1`: nada
+responde na rede local.
+
+No Windows sem `curl`, salve o
+[compose.yaml](https://raw.githubusercontent.com/LucasAzevedoCosta/interlinear/main/compose.yaml)
+pelo navegador.
+
+| Para | Comando |
+| ---- | ------- |
+| Ver os logs | `docker compose logs -f` |
+| Parar | `docker compose down` |
+| Atualizar | `docker compose pull && docker compose up -d` |
+| Apagar tudo, inclusive os projetos | `docker compose down -v` |
+
+- **Chaves de API:** cole na tela de Configurações, ou ponha num arquivo
+  `.env` ao lado do `compose.yaml` (modelo em [.env.example](.env.example)).
+- **Claude pela assinatura (experimental):** ponha
+  `INTERLINEAR_IMAGE_TAG=claude` no `.env` e rode `docker compose up -d`. Essa
+  imagem traz o Claude Code ([docs/provedores.md](docs/provedores.md)).
+- **IA local:** o container já alcança o Ollama e o LM Studio do seu
+  computador ([docs/configuracao.md](docs/configuracao.md#ia-local)).
+
+### A partir do código
+
+Para construir a imagem você mesmo (para modificar o código, veja o
+[CONTRIBUTING.md](CONTRIBUTING.md)):
 
 ```bash
 git clone https://github.com/LucasAzevedoCosta/interlinear.git
 cd interlinear
-```
-
-Sem o git, use **Code → Download ZIP** na página do repositório e descompacte.
-
-### Com Docker (recomendado)
-
-```bash
 docker compose up -d --build
 ```
 
-Abra `http://127.0.0.1:8000`. O primeiro build leva alguns minutos; os
-seguintes reaproveitam o que já foi baixado. A porta é publicada só em
-`127.0.0.1`, ou seja, nada responde na rede local.
-
-- **Dados:** projetos e preferências ficam no volume `interlinear-data`
-  (montado em `/data`), e sobrevivem a rebuilds. `docker compose down -v`
-  apaga tudo.
-- **Chaves:** crie um arquivo `.env` ao lado do `compose.yaml` com
-  `INTERLINEAR_OPENAI_KEY=...` e afins. O `.env` está no `.gitignore`.
-- **IA local:** o container alcança Ollama e LM Studio do seu computador por
-  `host.docker.internal`, já configurado. O LM Studio precisa estar servindo
-  na rede (opção *Serve on Local Network*), não só em `localhost`.
-- **OCR:** a imagem já traz o Tesseract com português e inglês.
-- **Claude pela assinatura (experimental):** ponha
-  `INTERLINEAR_WITH_CLAUDE=1` no `.env` e reconstrua; a imagem passa a trazer
-  o Claude Code (~350 MB a mais). Em Configurações, a seção "Claude pela
-  assinatura" mostra o estado da conta e como entrar, uma vez só — no Docker,
-  pela aba Exec do container. O login fica no volume `interlinear-claude`
-  ([docs/provedores.md](docs/provedores.md)).
-- **Logs:** `docker compose logs -f`
-- **Parar:** `docker compose down`
-- **Atualizar:** `git pull` e `docker compose up -d --build` de novo.
-
-### Com Python
-
-Primeiro confira a versão com `python3 --version` (no Windows,
-`py --version`). Se for menor que 3.11:
-
-| Sistema | Como instalar o Python |
-| ------- | ---------------------- |
-| Windows | `winget install Python.Python.3.12`, ou o instalador de [python.org](https://www.python.org/downloads/) marcando *Add python.exe to PATH* |
-| macOS | `brew install python@3.12` (o `python3` que vem com o macOS é antigo demais) |
-| Debian/Ubuntu | `sudo apt install python3.12 python3.12-venv`, ou o pacote `python3` se a sua versão já for 3.11+ |
-| Fedora | `sudo dnf install python3.12` |
-
-Depois, um comando cria o ambiente virtual e instala as dependências na
-primeira vez, e sobe o servidor nas seguintes:
-
-```bash
-./run.sh          # macOS e Linux
-```
-
-```powershell
-.\run.ps1         # Windows (PowerShell)
-```
-
-Se o PowerShell recusar o script, rode uma vez
-`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
-
-Abra `http://127.0.0.1:8000`. Para parar, `Ctrl+C` no terminal.
-
-Quem traduz pela assinatura do Claude pode entrar na conta pelo botão em
-**Configurações**, ou por `./run.sh login` (no Windows, `.\run.ps1 login`).
-Os dois chamam o login do próprio Claude Code
-([docs/provedores.md](docs/provedores.md)).
-
-#### Sem os scripts
-
-O mesmo que os scripts fazem, passo a passo:
-
-```bash
-python3 -m venv .venv                 # Windows: py -3.12 -m venv .venv
-source .venv/bin/activate             # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-
-cd backend
-python -m uvicorn app.main:app --port 8000
-```
-
-#### OCR para PDFs escaneados (opcional)
-
-Sem o [Tesseract](https://tesseract-ocr.github.io/), todo o resto funciona e
-o app avisa ao receber um PDF sem texto. Instale com os idiomas dos seus
-livros:
-
-| Sistema | Comando |
-| ------- | ------- |
-| Windows | `winget install UB-Mannheim.TesseractOCR`, ou o [instalador da UB Mannheim](https://github.com/UB-Mannheim/tesseract/wiki). Marque *Portuguese* em *Additional language data*. Veja a nota abaixo |
-| macOS | `brew install tesseract tesseract-lang` |
-| Debian/Ubuntu | `sudo apt install tesseract-ocr tesseract-ocr-por` |
-| Fedora | `sudo dnf install tesseract tesseract-langpack-por` |
-
-No Windows o instalador não coloca o Tesseract no `PATH`. Ou acrescente
-`C:\Program Files\Tesseract-OCR` ao `PATH`, ou aponte direto para ele antes
-de subir o app:
-
-```powershell
-$env:INTERLINEAR_TESSERACT = "C:\Program Files\Tesseract-OCR\tesseract.exe"
-.\run.ps1
-```
-
-### Onde ficam os dados
-
-Projetos e preferências (inclusive as chaves de API salvas pela tela) ficam
-fora da pasta do código:
-
-| Sistema | Pasta |
-| ------- | ----- |
-| Windows | `%APPDATA%\interlinear` |
-| macOS | `~/Library/Application Support/interlinear` |
-| Linux | `$XDG_DATA_HOME/interlinear`, em geral `~/.local/share/interlinear` |
-| Docker | volume `interlinear-data` |
-
-`INTERLINEAR_DATA_DIR` troca a pasta.
+O primeiro build leva alguns minutos. Com `INTERLINEAR_WITH_CLAUDE=1` no
+`.env`, a imagem construída inclui o Claude Code.
 
 ## Como usar
 
@@ -231,42 +155,6 @@ Baggins = Bolseiro
 O glossário é injetado em todo lote enviado ao modelo, que é o que mantém nomes
 e termos iguais do começo ao fim do livro.
 
-## Variáveis de ambiente
-
-| Variável                    | Para quê                                          |
-| --------------------------- | ------------------------------------------------- |
-| `INTERLINEAR_DATA_DIR`      | Pasta de projetos e preferências (padrão acima)   |
-| `INTERLINEAR_HOST`          | Endereço de escuta (padrão `127.0.0.1`)           |
-| `INTERLINEAR_PORT`          | Porta (padrão `8000`)                             |
-| `INTERLINEAR_ALLOWED_HOSTS` | Nomes extras aceitos no `Host`, separados por vírgula (`*` desliga a checagem) |
-| `INTERLINEAR_OPENAI_KEY`    | Chave da OpenAI, tem prioridade sobre a salva     |
-| `INTERLINEAR_ANTHROPIC_KEY` | Idem, Anthropic                                   |
-| `INTERLINEAR_GOOGLE_KEY`    | Idem, Google                                      |
-| `INTERLINEAR_COMPAT_KEY`    | Idem, endpoint compatível (OpenRouter etc.)       |
-| `INTERLINEAR_OLLAMA_URL`    | Endereço padrão do Ollama                         |
-| `INTERLINEAR_LMSTUDIO_URL`  | Endereço padrão do LM Studio                      |
-| `INTERLINEAR_LOG_LEVEL`     | `DEBUG` para ver o que o extrator decidiu         |
-| `INTERLINEAR_OCR_LANGS`     | Idiomas do OCR (padrão `por+eng`; só os instalados valem) |
-| `INTERLINEAR_TESSERACT`     | Caminho do Tesseract, se não estiver no `PATH`    |
-| `INTERLINEAR_CLAUDE`        | Caminho do Claude Code, se não estiver no `PATH` (Claude pela assinatura) |
-
-Usar as variáveis de ambiente evita gravar chave nenhuma em disco.
-
-## Testes
-
-Com o ambiente virtual ativo (veja [Sem os scripts](#sem-os-scripts)):
-
-```bash
-pip install -r requirements-dev.txt
-pytest
-```
-
-A suíte gera um PDF de teste com as armadilhas que aparecem em livros reais —
-cabeçalho corrente, numeração, parágrafo que atravessa a quebra de página,
-diálogo com travessão — e confere o caminho completo até o EPUB e de volta.
-Os testes de OCR são pulados quando o Tesseract não está instalado. A CI roda
-a suíte em Linux, macOS e Windows.
-
 ## Contribuindo
 
 Contribuições são bem-vindas: correções, suporte a mais layouts de PDF, novos
@@ -274,43 +162,6 @@ provedores de IA, traduções da interface. Antes de abrir um pull request, leia
 o [CONTRIBUTING.md](CONTRIBUTING.md), que explica como preparar o ambiente, as
 regras da arquitetura e o padrão dos commits. Para relatar uma falha de
 segurança, siga o [SECURITY.md](SECURITY.md) em vez de abrir uma issue.
-
-## Como está organizado
-
-```
-backend/app/
-  core/            nada aqui sabe que existe uma web ou uma IA
-    blocks.py      estrutura de dados comum a tudo
-    importer.py    arquivo enviado → documento, com progresso e resumo
-    pdf_extract.py PDF → blocos, via pistas tipográficas
-    ocr.py         páginas escaneadas → linhas, via Tesseract
-    structure.py   blocos → capítulos
-    epub_write.py  capítulos → EPUB 3
-    epub_read.py   EPUB → blocos
-    storage.py     projetos em disco, gravação atômica
-  ai/
-    base.py        interface comum, retentativa com espera exponencial
-    providers.py   OpenAI, Anthropic, Google, Ollama, LM Studio
-    translator.py  lotes, glossário, contexto, verificação de formato
-  jobs.py          tarefas em segundo plano: importação e tradução
-  routes/          HTTP
-frontend/          JavaScript puro, sem build
-```
-
-A regra que mantém isso navegável: `core/` não importa nada de `ai/` nem de
-`routes/`. Dá para usar o conversor como biblioteca, sem subir servidor:
-
-```python
-from app.core.pdf_extract import extract_blocks
-from app.core.structure import split_into_chapters
-from app.core.epub_write import write_epub
-from app.core.blocks import Document
-
-blocks, title = extract_blocks("livro.pdf", source_name="livro.pdf")
-doc = Document(title=title)
-doc.chapters = split_into_chapters(blocks)
-write_epub(doc, "livro.epub")
-```
 
 ## Limitações conhecidas
 

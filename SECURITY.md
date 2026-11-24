@@ -10,8 +10,8 @@ Inclua o que for possível:
 
 - o que a falha permite (ler chaves, ler arquivos, executar código...);
 - os passos para reproduzir;
-- a versão (commit) e o sistema operacional;
-- se o app estava rodando direto ou no Docker, e com quais variáveis
+- a versão (tag da imagem ou commit) e o sistema operacional onde o Docker roda;
+- com quais variáveis
   `INTERLINEAR_*`.
 
 Você recebe uma resposta assim que possível. Depois da correção, a falha é

@@ -17,8 +17,8 @@ troque uma biblioteca por outra sem perceber o efeito.
 | `python-multipart` | Apache-2.0 | Upload de arquivos     |
 | `pypdfium2`      | Apache-2.0 / BSD-3 | Renderiza páginas para o OCR |
 
-O OCR usa o **Tesseract** (Apache-2.0), chamado como programa externo. Ele é
-opcional fora do Docker: sem ele, só os PDFs escaneados deixam de funcionar.
+O OCR usa o **Tesseract** (Apache-2.0), chamado como programa externo e
+instalado na imagem Docker.
 
 O caminho mais comum para OCR em Python, o `ocrmypdf` (MPL-2.0), ficou de
 fora porque depende do **Ghostscript**, que é AGPL. É a mesma armadilha

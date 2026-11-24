@@ -25,19 +25,19 @@ body:
     validations:
       required: true
   - type: dropdown
-    id: como-roda
+    id: imagem
     attributes:
-      label: Como você roda o Interlinear
+      label: Imagem
       options:
-        - Docker
-        - run.sh / run.ps1
-        - uvicorn direto
+        - Publicada (ghcr.io), sem o Claude Code
+        - Publicada (ghcr.io), com o Claude Code
+        - Construída do código (docker compose up --build)
     validations:
       required: true
   - type: dropdown
     id: sistema
     attributes:
-      label: Sistema operacional
+      label: Sistema operacional (onde o Docker roda)
       options:
         - Windows
         - macOS
@@ -48,7 +48,7 @@ body:
     id: versao
     attributes:
       label: Versão
-      description: Saída de `git rev-parse --short HEAD`, ou a data em que baixou.
+      description: A versão da imagem (`docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' interlinear`) ou, construindo do código, `git rev-parse --short HEAD`.
   - type: input
     id: provedor
     attributes:
@@ -59,7 +59,7 @@ body:
     attributes:
       label: Logs
       description: >-
-        O que apareceu no terminal (ou em `docker compose logs`). Com
+        A saída de `docker compose logs`. Com
         `INTERLINEAR_LOG_LEVEL=DEBUG` sai mais detalhe. Confira se não há
         nenhuma chave de API antes de colar.
       render: text
