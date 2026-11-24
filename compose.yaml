@@ -71,6 +71,20 @@ services:
       - ./:/app:ro
       - interlinear-dev-data:/data
 
+  # Formata o Python com o ruff format. É o único serviço que monta o projeto
+  # com escrita, porque precisa reescrever os arquivos:
+  #   docker compose run --rm format
+  format:
+    profiles: ["dev"]
+    image: interlinear:dev
+    build:
+      context: .
+      target: dev
+    working_dir: /app
+    command: ["ruff", "format", "."]
+    volumes:
+      - ./:/app
+
 volumes:
   interlinear-data:
   interlinear-claude:

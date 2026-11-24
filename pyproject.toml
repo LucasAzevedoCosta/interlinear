@@ -36,8 +36,8 @@ extend-exclude = ["frontend"]
 
 [tool.ruff.lint]
 # Erros de verdade (nomes indefinidos, imports sem uso, sintaxe) e as
-# armadilhas mais comuns do bugbear. O estilo fica para o formatador, que
-# ainda não é obrigatório.
+# armadilhas mais comuns do bugbear. O estilo fica com o `ruff format`, que a
+# CI também confere.
 select = ["F", "E4", "E7", "E9", "B"]
 ignore = [
     "B008",  # Depends()/Body() como valor padrão é o jeito do FastAPI

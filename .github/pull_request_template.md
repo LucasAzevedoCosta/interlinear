@@ -12,7 +12,7 @@
 
 ## Checklist
 
-- [ ] `docker compose run --rm dev pytest` e `ruff check .` passam
+- [ ] `pytest`, `ruff format --check .` e `ruff check .` passam (no container `dev`)
 - [ ] Bug corrigido tem teste que falhava antes
 - [ ] `core/` continua sem importar `ai/` nem `routes/`
 - [ ] Nenhuma dependência nova com licença GPL/AGPL

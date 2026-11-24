@@ -49,6 +49,7 @@ página. Mudou `requirements*.txt` ou o `Dockerfile`? Reconstrua com
 Os mesmos comandos, todos dentro da imagem `dev`. Rode antes de abrir o PR:
 
 ```bash
+docker compose run --rm dev ruff format --check .                 # formatação
 docker compose run --rm dev ruff check .                          # linter
 docker compose run --rm dev pytest                                # testes
 docker compose run --rm dev bandit -q -c pyproject.toml -r backend/app   # padrões inseguros
@@ -100,6 +101,17 @@ A CI também constrói a imagem de produção e confere que ela sobe e responde.
 - Comentários explicam o *porquê*, não o *quê*.
 - O `.editorconfig` define indentação e fim de linha: 4 espaços em Python, 2
   em JavaScript, CSS e HTML.
+- O Python é formatado pelo `ruff format` (linhas de até 100 colunas), e a CI
+  recusa código fora do padrão. Para formatar:
+
+  ```bash
+  docker compose run --rm format
+  ```
+
+  É o único serviço que monta o projeto com escrita, porque precisa
+  reescrever os arquivos.
+
+  Commits só de formatação entram no `.git-blame-ignore-revs`.
 
 ## Commits
 
