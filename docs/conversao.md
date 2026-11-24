@@ -408,10 +408,30 @@ configurado, inclusive o Claude pela assinatura e os modelos locais.
    sugestão rejeitada não volta numa revisão nova. Confirmar "está certo"
    tira a marca de trecho duvidoso do bloco.
 
+**Revisão visual.** No mesmo menu, "Páginas com trechos duvidosos" e "Página
+N" mandam ao modelo a **imagem da página do PDF** junto com o texto que a
+conversão tirou dela. É o único jeito de pegar o que a revisão de texto não vê:
+uma linha ou um parágrafo que sumiu na extração (o modelo transcreve e sugere
+inserir no lugar certo), letra trocada pelo OCR ("rn" no lugar de "m") e título
+que saiu como parágrafo. Precisa do PDF original (livros importados de EPUB
+não têm) e de um **modelo que leia imagens**: os Claude, os GPT-4o e mais
+novos, os Gemini; nos modelos locais, só os de visão (por exemplo, `llava` ou
+`qwen2.5vl` no Ollama). Cada página é uma imagem de dezenas de KB, então custa
+mais que a revisão de texto: por isso ela olha as páginas com mais trechos
+duvidosos (até 10), ou só a que você escolher. O texto sugerido para inserir
+só aparece se ainda não estiver nos blocos em volta, e você o vê inteiro
+antes de aceitar.
+
 Num livro de teste com um erro de cada tipo, Claude Haiku e Sonnet acertaram
 todas as sugestões em 6 rodadas seguidas, em 3 a 8 segundos por livro. Num
 livro real os erros se misturam, então vale conferir antes de aceitar em
 grupo.
+
+Na revisão visual, um PDF de teste com três erros plantados (um diálogo
+apagado, "rnecanismo" no lugar de "mecanismo" e um título virado parágrafo)
+teve os três achados pelo Claude Sonnet, com o diálogo transcrito igual ao
+original, e nenhum alarme na página que não tinha erro. Três páginas levaram
+12 segundos.
 
 ---
 
