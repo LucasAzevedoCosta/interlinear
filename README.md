@@ -38,7 +38,9 @@ exportação, então o que aparece na tela é exatamente o que vai para o arquiv
   desatualizada, e o próximo **Traduzir** refaz só esses
 - **Aponta os trechos duvidosos** da conversão (parágrafo partido, cabeçalho
   que escapou, número de página) e, se você quiser, **revisa com IA**: o
-  modelo sugere o que fazer com cada um e nada muda no livro sem você aceitar
+  modelo sugere o que fazer com cada um, e você aceita ou deixa que ele aplique
+  sozinho as correções de baixo risco, sempre com desfazer. Também compara a
+  imagem da página do PDF com o texto, para achar o que sumiu na conversão
   ([docs/conversao.md](docs/conversao.md), seções 4 e 5)
 - **Edita** parágrafo a parágrafo, com salvamento automático
 - **Mostra a prévia** de cada capítulo como ele vai aparecer no leitor

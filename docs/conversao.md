@@ -408,6 +408,20 @@ configurado, inclusive o Claude pela assinatura e os modelos locais.
    sugestão rejeitada não volta numa revisão nova. Confirmar "está certo"
    tira a marca de trecho duvidoso do bloco.
 
+**Modo automático.** Nas Configurações, em "Revisão da conversão por IA", dá
+para trocar "Só sugerir" por "Aplicar sozinho as de baixo risco". Aí, no fim
+de cada revisão, as sugestões acima de um limite de confiança (90% por
+padrão) são aplicadas sem esperar o clique, mas só as que não mexem na
+estrutura do livro e que a conferência consegue checar: apagar número de
+página e cabeçalho, juntar parágrafo partido, corrigir letra trocada e
+confirmar que um trecho está certo. Trocar o tipo de um bloco, começar ou
+juntar capítulo e inserir texto continuam esperando você, porque foi aí que o
+modelo errou com confiança alta nos testes. **Tudo o que foi aplicado pode ser
+desfeito**, no próprio bloco ("IA aplicou · Desfazer") ou no painel ("Desfazer
+as automáticas"); desfeita, a mudança volta a ser sugestão. Uma mudança que
+você editou depois não é desfeita por cima da sua edição. Também dá para
+pedir que a revisão comece sozinha assim que a importação de um PDF termina.
+
 **Revisão visual.** No mesmo menu, "Páginas com trechos duvidosos" e "Página
 N" mandam ao modelo a **imagem da página do PDF** junto com o texto que a
 conversão tirou dela. É o único jeito de pegar o que a revisão de texto não vê:
