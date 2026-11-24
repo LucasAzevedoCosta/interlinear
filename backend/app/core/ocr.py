@@ -21,7 +21,6 @@ import re
 import shutil
 import subprocess
 import tempfile
-import threading
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
@@ -30,6 +29,7 @@ from typing import Callable
 
 from lxml import html as lxml_html
 
+from .page_image import PDFIUM_LOCK
 from .pdf_extract import Line, _reading_order
 
 log = logging.getLogger(__name__)
@@ -119,7 +119,9 @@ def read_lines(
     lang = languages(langs)
     document = pdfium.PdfDocument(pdf_path)
     numbers = pages or list(range(1, len(document) + 1))
-    render_lock = threading.Lock()
+    # A trava do processo, não uma por chamada: duas importações com OCR, ou
+    # uma importação e a revisão visual, renderizam ao mesmo tempo.
+    render_lock = PDFIUM_LOCK
     log.info("OCR de %d páginas (%s)", len(numbers), lang)
 
     try:

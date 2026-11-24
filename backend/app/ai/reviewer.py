@@ -19,16 +19,16 @@ import asyncio
 import json
 import logging
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, TypeVar
 
 import httpx
 
 from ..core.blocks import Block, Document
 from ..core.review import Suspect
 from .base import Message, PlanLimitError, Provider, ProviderError, Usage
-from .review_validation import Rejection, validate
+from .review_validation import INSERT_MAX_CHARS, Rejection, validate
 from .translator import MAX_CONSECUTIVE_FAILURES, is_fatal, looks_like_refusal
 
 log = logging.getLogger(__name__)
@@ -44,6 +44,9 @@ OPERATIONS = frozenset(
         "fix_text",  # erro de extração no texto: payload "text"
         "start_chapter",  # um capítulo começa neste bloco
         "merge_chapter",  # o capítulo do bloco devia fazer parte do anterior
+        # Só na revisão visual: texto que está na página e sumiu na extração,
+        # para entrar depois do bloco. Payload "text".
+        "insert_after",
     }
 )
 
@@ -161,6 +164,18 @@ class ReviewResult:
 
 
 ProgressCallback = Callable[[ReviewResult], None]
+
+T = TypeVar("T")
+
+
+@dataclass
+class BatchOutcome:
+    """O que um lote rendeu: propostas, unidades revisadas e falhas."""
+
+    proposals: list[Proposal]
+    reviewed: int
+    failed: int
+    usage: Usage
 
 
 # --------------------------------------------------------------------------
@@ -305,6 +320,11 @@ def _proposal(item: dict[str, Any], case: Case) -> Proposal | None:
         if not isinstance(text, str) or not text.strip() or text == case.block.text:
             return None
         payload["text"] = text.strip()
+    elif op == "insert_after":
+        text = item.get("text")
+        if not isinstance(text, str) or not 2 <= len(text.strip()) <= INSERT_MAX_CHARS:
+            return None
+        payload["text"] = text.strip()
 
     try:
         confidence = float(item.get("confidence", 0.5))
@@ -430,7 +450,44 @@ class Reviewer:
         self.book_title = document.title
         cases = build_cases(document, suspects)
         batches = build_batches(cases, max_chars=self.batch_chars)
-        result = ReviewResult(total=len(cases))
+
+        async def one(batch: list[Case]) -> BatchOutcome:
+            proposals, usage = await self.review_batch(batch)
+            found = [p for p in proposals if p is not None]
+            return BatchOutcome(found, len(found), len(proposals) - len(found), usage)
+
+        order = {case.block.id: i for i, case in enumerate(cases)}
+        return await self.run_batches(
+            document,
+            batches,
+            one,
+            total=len(cases),
+            size=len,
+            order=order,
+            on_progress=on_progress,
+            should_stop=should_stop,
+        )
+
+    async def run_batches(
+        self,
+        document: Document,
+        batches: Sequence[T],
+        review_one: Callable[[T], Awaitable[BatchOutcome]],
+        *,
+        total: int,
+        size: Callable[[T], int],
+        order: dict[str, int],
+        on_progress: ProgressCallback | None = None,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> ReviewResult:
+        """Roda os lotes com concorrência, junta o resultado e valida.
+
+        Comum à revisão de texto e à visual (ai/visual_reviewer.py): muda o
+        que é um lote (trechos ou uma página) e como ele é revisado.
+        `size` diz quantas unidades um lote conta no progresso quando falha
+        inteiro; `order` põe as propostas na ordem do livro.
+        """
+        result = ReviewResult(total=total)
         semaphore = asyncio.Semaphore(max(1, self.concurrency))
         lock = asyncio.Lock()
         abort: list[ProviderError] = []
@@ -439,17 +496,17 @@ class Reviewer:
         def halted() -> bool:
             return bool(abort) or bool(should_stop and should_stop())
 
-        async def run(batch: list[Case]) -> None:
+        async def run(batch: T) -> None:
             nonlocal consecutive_failures
             async with semaphore:
                 if halted():
                     return
                 try:
-                    proposals, usage = await self.review_batch(batch)
+                    outcome = await review_one(batch)
                 except ProviderError as exc:
                     log.error("Lote da revisão falhou: %s", exc)
                     async with lock:
-                        result.failed += len(batch)
+                        result.failed += size(batch)
                         consecutive_failures += 1
                         if not abort and (
                             is_fatal(exc)
@@ -460,14 +517,11 @@ class Reviewer:
                     return
 
             async with lock:
-                result.usage = result.usage + usage
-                for proposal in proposals:
-                    if proposal is None:
-                        result.failed += 1
-                    else:
-                        result.reviewed += 1
-                        result.proposals.append(proposal)
-                consecutive_failures = 0 if any(proposals) else consecutive_failures + 1
+                result.usage = result.usage + outcome.usage
+                result.reviewed += outcome.reviewed
+                result.failed += outcome.failed
+                result.proposals.extend(outcome.proposals)
+                consecutive_failures = 0 if outcome.reviewed else consecutive_failures + 1
                 if not abort and consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                     abort.append(ProviderError("O modelo não devolveu revisões aproveitáveis."))
                 if on_progress:
@@ -484,8 +538,7 @@ class Reviewer:
                 f"sem resposta aproveitável. Último erro: {exc}",
                 status=exc.status,
             ) from exc
-        order = {case.block.id: i for i, case in enumerate(cases)}
-        result.proposals.sort(key=lambda p: order[p.block_id])
+        result.proposals.sort(key=lambda p: order.get(p.block_id, len(order)))
         result.proposals, result.rejected = validate(document, result.proposals)
         for rejection in result.rejected:
             log.info(

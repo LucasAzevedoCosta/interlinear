@@ -114,6 +114,20 @@ def merge_with_next(document: Document, block_id: str) -> tuple[Chapter, Block]:
     return chapter, merged
 
 
+def insert_paragraph_after(document: Document, block_id: str, text: str) -> Block:
+    """Um parágrafo novo depois do bloco, na mesma página. Devolve o bloco.
+
+    Para texto que a extração perdeu. meta["inserted"] é a mesma marca do
+    "Inserir abaixo" do editor.
+    """
+    chapter, index = locate_block(document, block_id)
+    block = Block(
+        kind="paragraph", text=text, page=chapter.blocks[index].page, meta={"inserted": True}
+    )
+    chapter.blocks.insert(index + 1, block)
+    return block
+
+
 def split_chapter(document: Document, chapter_id: str, block_id: str) -> Chapter:
     """Divide o capítulo em dois a partir de um bloco. Devolve o capítulo novo."""
     chapter = find_chapter(document, chapter_id)

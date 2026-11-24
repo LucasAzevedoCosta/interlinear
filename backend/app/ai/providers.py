@@ -89,7 +89,7 @@ class OpenAICompatProvider(Provider):
     async def complete(self, messages: list[Message], *, client: httpx.AsyncClient) -> Completion:
         payload: dict[str, Any] = {
             "model": self.config.model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": [{"role": m.role, "content": _openai_content(m)} for m in messages],
             "temperature": self.config.temperature,
             "max_tokens": self.config.max_tokens,
             "stream": False,
@@ -212,7 +212,7 @@ class AnthropicProvider(Provider):
     async def complete(self, messages: list[Message], *, client: httpx.AsyncClient) -> Completion:
         system_parts = [m.content for m in messages if m.role == "system"]
         turns = [
-            {"role": m.role, "content": m.content}
+            {"role": m.role, "content": _anthropic_content(m)}
             for m in messages
             if m.role in ("user", "assistant")
         ]
@@ -294,7 +294,7 @@ class GoogleProvider(Provider):
         contents = [
             {
                 "role": "model" if m.role == "assistant" else "user",
-                "parts": [{"text": m.content}],
+                "parts": _google_parts(m),
             }
             for m in messages
             if m.role in ("user", "assistant")
@@ -507,11 +507,25 @@ class ClaudeCliProvider(Provider):
 
         system = "\n\n".join(m.content for m in messages if m.role == "system")
         prompt = "\n\n".join(m.content for m in messages if m.role != "system")
+        images = [image for m in messages if m.role != "system" for image in m.images_b64()]
+        if images:
+            # Com imagem, a mensagem vai em blocos, como na API: o Claude Code
+            # roda sem ferramentas e não abriria um arquivo de imagem.
+            formats = [
+                "--input-format",
+                "stream-json",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+            ]
+            stdin = json.dumps(_cli_user_message(prompt, images)) + "\n"
+        else:
+            formats = ["--output-format", "json"]
+            stdin = prompt
         code, out, err = await self._run(
             [
                 "-p",
-                "--output-format",
-                "json",
+                *formats,
                 "--model",
                 self.model,
                 "--system-prompt",
@@ -524,14 +538,11 @@ class ClaudeCliProvider(Provider):
                 "--disable-slash-commands",
                 "--no-session-persistence",
             ],
-            stdin=prompt,
+            stdin=stdin,
             timeout=self.config.timeout,
         )
 
-        try:
-            data = json.loads(out)
-        except json.JSONDecodeError:
-            data = None
+        data = _cli_result(out) if images else _json_or_none(out)
         if not isinstance(data, dict):
             raise _cli_error((err or out).strip() or f"Claude Code saiu com código {code}")
         if data.get("is_error") or data.get("subtype") != "success":
@@ -553,6 +564,82 @@ class ClaudeCliProvider(Provider):
 
     async def list_models(self, *, client: httpx.AsyncClient) -> list[ModelInfo]:
         return list(CLAUDE_CLI_MODELS)
+
+
+def _json_or_none(text: str) -> Any:
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+
+def _cli_result(stream: str) -> Any:
+    """No stream-json, a resposta final é a linha com "type": "result"."""
+    for line in reversed(stream.splitlines()):
+        data = _json_or_none(line)
+        if isinstance(data, dict) and data.get("type") == "result":
+            return data
+    return None
+
+
+def _cli_user_message(prompt: str, images: list[str]) -> dict[str, Any]:
+    return {
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [
+                *(
+                    {
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": "image/png", "data": image},
+                    }
+                    for image in images
+                ),
+                {"type": "text", "text": prompt},
+            ],
+        },
+    }
+
+
+# -- imagens no formato de cada API -----------------------------------------
+# Sem imagens, o conteúdo continua sendo a string de sempre.
+
+
+def _openai_content(message: Message) -> Any:
+    if not message.images:
+        return message.content
+    return [
+        {"type": "text", "text": message.content},
+        *(
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image}"}}
+            for image in message.images_b64()
+        ),
+    ]
+
+
+def _anthropic_content(message: Message) -> Any:
+    if not message.images:
+        return message.content
+    return [
+        *(
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/png", "data": image},
+            }
+            for image in message.images_b64()
+        ),
+        {"type": "text", "text": message.content},
+    ]
+
+
+def _google_parts(message: Message) -> list[dict[str, Any]]:
+    return [
+        *(
+            {"inline_data": {"mime_type": "image/png", "data": image}}
+            for image in message.images_b64()
+        ),
+        {"text": message.content},
+    ]
 
 
 def _cli_error(message: str, *, status: Any = None) -> ProviderError:

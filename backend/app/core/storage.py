@@ -219,6 +219,16 @@ class ProjectStore:
 
         return document
 
+    def source_pdf(self, project_id: str) -> Path | None:
+        """O PDF original do projeto, se ele veio de um e o arquivo ainda está lá."""
+        directory = self.source_dir(project_id)
+        if not directory.is_dir():
+            return None
+        return next(
+            (f for f in sorted(directory.iterdir()) if f.is_file() and f.suffix.lower() == ".pdf"),
+            None,
+        )
+
     def load_review(self, project_id: str) -> dict[str, Any]:
         """O review.json do projeto; vazio se ainda não houve revisão."""
         path = self._review_path(project_id)

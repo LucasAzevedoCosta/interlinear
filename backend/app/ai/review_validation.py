@@ -41,6 +41,10 @@ FIX_MIN_CHANGES = 4
 # perderia texto do livro. O mesmo limite da regra de texto repetido.
 DELETE_MAX_WORDS = 12
 
+# Texto que faltou (revisão visual): no máximo um parágrafo longo.
+INSERT_MAX_CHARS = 1500
+_INLINE_TAGS = frozenset({"em", "strong", "sup", "i", "b"})
+
 _TAG = re.compile(r"</?[a-zA-Z][^>]*>")
 _TEXT = re.compile(r"<[^>]+>")
 
@@ -125,7 +129,38 @@ def _check(proposal: Proposal, where: dict[str, tuple[int, Chapter, int]]) -> st
         return "o bloco já abre o capítulo" if index == 0 else None
     if op == "merge_chapter":
         return "o primeiro capítulo não tem anterior" if chapter_index == 0 else None
+    if op == "insert_after":
+        return _check_insert(chapter.blocks, index, proposal.payload.get("text", ""))
     return f"operação desconhecida: {op}"
+
+
+def _check_insert(blocks: list[Block], index: int, text: str) -> str | None:
+    """Texto que faltou, transcrito da imagem pelo modelo.
+
+    É a única operação em que o modelo escreve texto que não estava no livro,
+    então precisa parecer texto do livro e não pode repetir o que já está ali.
+    """
+    plain = _normalize(text)
+    if len(plain) < 3 or not any(c.isalpha() for c in plain):
+        return "o texto a inserir é curto demais para ser texto do livro"
+    if len(text) > INSERT_MAX_CHARS:
+        return f"o texto a inserir passa de {INSERT_MAX_CHARS} caracteres"
+    tags = {tag.strip("</>").split()[0].lower() for tag in _TAG.findall(text)}
+    if not tags <= _INLINE_TAGS:
+        return "o texto a inserir traz marcações que o livro não usa"
+    # O modelo às vezes "acha" faltando o que só está em outro bloco perto,
+    # partido ou com outra hifenização. Começo ou texto inteiro já presentes
+    # na vizinhança: não falta.
+    nearby = " ".join(_normalize(b.text) for b in blocks[max(0, index - 2) : index + 4])
+    if plain in nearby or plain[:40] in nearby:
+        return "o texto a inserir já está no livro"
+    return None
+
+
+def _normalize(text: str) -> str:
+    """Sem tags, sem hífen de quebra, minúsculo e com espaços simples."""
+    text = _TEXT.sub("", text).lower().replace("-\n", "").replace("- ", "")
+    return " ".join(text.split())
 
 
 def _mergeable(first: Block, second: Block) -> str | None:

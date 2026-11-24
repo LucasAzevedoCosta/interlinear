@@ -34,8 +34,24 @@
         <span id="reviewRunLabel"></span>
         <button class="btn btn--quiet" id="reviewStop">Parar</button>
       </span>
-      <button class="btn" id="reviewBtn" hidden
-        title="Manda os trechos duvidosos da conversão para o modelo de IA conferir. Nada muda no livro sem você aceitar.">Revisar com IA</button>
+      <span class="menu-anchor">
+        <button class="btn" id="reviewBtn" aria-haspopup="menu" aria-expanded="false" hidden
+          title="O modelo de IA confere a conversão e sugere correções. Nada muda no livro sem você aceitar.">Revisar com IA ▾</button>
+        <span class="menu" id="reviewMenu" role="menu" hidden>
+          <button role="menuitem" id="reviewText">
+            <b>Trechos duvidosos</b>
+            <span>O modelo lê os trechos marcados e o texto em volta. Rápido e barato</span>
+          </button>
+          <button role="menuitem" id="reviewPages">
+            <b>Páginas com trechos duvidosos</b>
+            <span>Compara a imagem dessas páginas do PDF com o texto. Pega o que sumiu</span>
+          </button>
+          <button role="menuitem" id="reviewThisPage">
+            <b id="reviewThisPageTitle">Esta página</b>
+            <span>Compara a imagem da página que está na tela com o texto dela</span>
+          </button>
+        </span>
+      </span>
       <button class="btn" id="translateBtn" hidden>Traduzir</button>
       <span class="menu-anchor">
         <button class="btn" id="exportBtn" aria-haspopup="menu" aria-expanded="false" hidden>Exportar EPUB ▾</button>

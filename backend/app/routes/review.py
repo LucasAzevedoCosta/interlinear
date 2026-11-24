@@ -1,6 +1,8 @@
 """Rotas da revisão da conversão por IA (modo sugestão).
 
-    POST /api/projects/{id}/review                  inicia a revisão em segundo plano
+    POST /api/projects/{id}/review                  inicia a revisão em segundo plano;
+                                                    {"mode": "visual", "pages"?: [3, 7]}
+                                                    compara com as páginas do PDF
     GET  /api/projects/{id}/review                  sugestões e a tarefa atual
     POST /api/projects/{id}/review/accept           {"ids": [...]}
     POST /api/projects/{id}/review/reject           {"ids": [...]}
@@ -24,6 +26,8 @@ from ..ai import review_apply
 from ..ai.base import ProviderError
 from ..ai.review_validation import validate
 from ..ai.reviewer import OPERATIONS, Reviewer, ReviewResult
+from ..ai.visual_reviewer import PageCase, VisualReviewer, choose_pages, page_blocks
+from ..core.page_image import render_page
 from ..core.review import find_suspects
 from ..deps import get_settings_store, get_store
 from ..jobs import review_registry
@@ -39,7 +43,9 @@ async def start_review(
 ) -> dict[str, Any]:
     """Manda os trechos suspeitos ao modelo. As sugestões vão para o review.json.
 
-    Usa o provedor ativo, ou o "provider_id" do pedido.
+    Usa o provedor ativo, ou o "provider_id" do pedido. Com "mode": "visual",
+    compara a imagem das páginas do PDF com o texto extraído delas: as
+    páginas de "pages", ou as com mais trechos duvidosos.
     """
     store = get_store()
     try:
@@ -47,24 +53,51 @@ async def start_review(
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(404, "Projeto não encontrado") from exc
 
+    mode = payload.get("mode") or "text"
+    if mode not in ("text", "visual"):
+        raise HTTPException(400, f"Modo de revisão desconhecido: {mode}")
+
     review = await asyncio.to_thread(store.load_review, project_id)
     suspects = review_apply.open_suspects(document, review, find_suspects(document))
-    blocks = {s.block_id for s in suspects if s.block_id}
-    if not blocks:
-        return {"job": None, "message": "Nenhum trecho duvidoso para revisar."}
+
+    if mode == "visual":
+        pdf = store.source_pdf(project_id)
+        if pdf is None:
+            raise HTTPException(
+                400, "A revisão visual precisa do PDF original, e este livro não veio de um."
+            )
+        pages = _pages(payload.get("pages")) or choose_pages(document, suspects)
+        if not pages:
+            return {
+                "job": None,
+                "message": "Nenhuma página com trechos duvidosos. Escolha as páginas a conferir.",
+            }
+        total = len(pages)
+    else:
+        blocks = {s.block_id for s in suspects if s.block_id}
+        if not blocks:
+            return {"job": None, "message": "Nenhum trecho duvidoso para revisar."}
+        total = len(blocks)
 
     settings = get_settings_store().load()
     provider, profile = _resolve_provider(settings, payload.get("provider_id"))
 
     try:
-        job = review_registry.create(uuid.uuid4().hex[:12], project_id, total=len(blocks))
+        job = review_registry.create(uuid.uuid4().hex[:12], project_id, total=total)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
 
     def on_progress(result: ReviewResult) -> None:
+        job.progress.total = result.total
         job.progress.done = result.reviewed
         job.progress.failed = result.failed
         job.progress.usage = result.usage
+
+    def render() -> list[PageCase]:
+        # Fora do loop de eventos: renderizar é trabalho de CPU, sob trava.
+        return [
+            PageCase(page, render_page(pdf, page), page_blocks(document, page)) for page in pages
+        ]
 
     def persist(result: ReviewResult) -> dict[str, int]:
         # Valida de novo contra o livro de agora: o usuário pode ter editado
@@ -75,17 +108,30 @@ async def start_review(
             return store.update_review(
                 project_id,
                 lambda data: review_apply.record_review(
-                    data, current, valid, provider=profile.label, model=profile.model
+                    data, current, valid, provider=profile.label, model=profile.model, source=mode
                 ),
             )
 
     async def run() -> None:
         status = "error"
         try:
-            async with Reviewer(provider) as reviewer:
-                result = await reviewer.review(
-                    document, suspects, on_progress=on_progress, should_stop=lambda: job.should_stop
-                )
+            if mode == "visual":
+                page_cases = await asyncio.to_thread(render)
+                async with VisualReviewer(provider) as reviewer:
+                    result = await reviewer.review_pages(
+                        document,
+                        page_cases,
+                        on_progress=on_progress,
+                        should_stop=lambda: job.should_stop,
+                    )
+            else:
+                async with Reviewer(provider) as reviewer:
+                    result = await reviewer.review(
+                        document,
+                        suspects,
+                        on_progress=on_progress,
+                        should_stop=lambda: job.should_stop,
+                    )
             counts = await asyncio.to_thread(persist, result)
             job.progress.current_note = _note(counts)
             status = "stopped" if job.should_stop else "done"
@@ -95,6 +141,8 @@ async def start_review(
         except FileNotFoundError:
             log.info("Projeto %s apagado durante a revisão", project_id)
             status = "stopped"
+        except ValueError as exc:  # página que o PDF não tem
+            job.error = str(exc)
         except asyncio.CancelledError:
             status = "stopped"
             raise
@@ -165,6 +213,23 @@ async def stop(project_id: str) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------
+
+
+# Uma revisão visual pedida à mão olha no máximo isto: cada página é uma imagem.
+MAX_VISUAL_PAGES = 30
+
+
+def _pages(value: Any) -> list[int]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(
+        isinstance(p, int) and not isinstance(p, bool) and p >= 1 for p in value
+    ):
+        raise HTTPException(400, "Campo 'pages' deve ser uma lista de números de página")
+    pages = sorted(set(value))
+    if len(pages) > MAX_VISUAL_PAGES:
+        raise HTTPException(400, f"No máximo {MAX_VISUAL_PAGES} páginas por revisão visual")
+    return pages
 
 
 def _ids(payload: dict[str, Any]) -> list[str]:

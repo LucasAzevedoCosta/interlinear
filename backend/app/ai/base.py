@@ -9,6 +9,7 @@ rodando em localhost.
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import random
 from abc import ABC, abstractmethod
@@ -55,6 +56,13 @@ class PlanLimitError(ProviderError):
 class Message:
     role: str  # "system" | "user" | "assistant"
     content: str
+    # Imagens PNG que acompanham o texto (revisão visual da conversão). Cada
+    # provedor as manda no formato dele; sem imagens, o pedido é só texto,
+    # igual ao de sempre.
+    images: list[bytes] = field(default_factory=list)
+
+    def images_b64(self) -> list[str]:
+        return [base64.b64encode(image).decode("ascii") for image in self.images]
 
 
 @dataclass

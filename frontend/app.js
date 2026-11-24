@@ -1272,11 +1272,12 @@ const OP_LABELS = {
   fix_text: 'Corrigir o texto',
   start_chapter: 'Começar capítulo aqui',
   merge_chapter: 'Juntar ao capítulo anterior',
+  insert_after: 'Inserir texto que faltou',
 };
 
 // Na ordem em que aparecem no painel: o que mais aparece e menos arrisca primeiro.
 const OP_ORDER = [
-  'delete', 'merge_next', 'merge_prev', 'fix_text', 'set_kind',
+  'delete', 'merge_next', 'merge_prev', 'fix_text', 'insert_after', 'set_kind',
   'start_chapter', 'merge_chapter', 'ok',
 ];
 
@@ -1311,14 +1312,17 @@ async function loadReview() {
   paintSuggestions();
 }
 
-async function startReview() {
+// body: {} revisa os trechos duvidosos; {mode: 'visual', pages?} compara com
+// a imagem das páginas do PDF.
+async function startReview(body = {}) {
   if (!state.project) return;
+  closeReviewMenu();
   await flushSaves();
   try {
     const data = await api(`/api/projects/${state.project.id}/review`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: '{}',
+      body: JSON.stringify(body),
     });
     if (!data.job) { toast(data.message || 'Nada a revisar'); return; }
     toast(`Revisando com ${data.model || data.provider}`);
@@ -1331,6 +1335,41 @@ async function startReview() {
 function showReviewRun(job) {
   const done = job.done + job.failed;
   $('reviewRunLabel').textContent = `Revisando ${done}/${job.total}`;
+}
+
+/* Menu: trechos duvidosos (texto) ou páginas do PDF (imagem). */
+
+// A página do primeiro bloco visível no editor: a que o usuário está olhando.
+function visiblePage() {
+  const top = $('editor').getBoundingClientRect().top;
+  for (const wrapper of document.querySelectorAll('#editorInner .block')) {
+    if (wrapper.getBoundingClientRect().bottom < top + 40) continue;
+    const page = blockById(wrapper.dataset.id)?.page;
+    if (page) return page;
+  }
+  return null;
+}
+
+function openReviewMenu() {
+  const fromPdf = state.project?.source_kind === 'pdf';
+  const page = fromPdf ? visiblePage() : null;
+  $('reviewPages').disabled = !fromPdf;
+  $('reviewThisPage').disabled = !page;
+  $('reviewThisPage').dataset.page = page || '';
+  $('reviewThisPageTitle').textContent = page ? `Página ${page}` : 'Esta página';
+  if (!fromPdf) {
+    $('reviewPages').title = 'Só para livros importados de PDF';
+    $('reviewThisPage').title = 'Só para livros importados de PDF';
+  }
+  closeExportMenu();
+  $('reviewMenu').hidden = false;
+  $('reviewBtn').setAttribute('aria-expanded', 'true');
+  $('reviewText').focus();
+}
+
+function closeReviewMenu() {
+  $('reviewMenu').hidden = true;
+  $('reviewBtn').setAttribute('aria-expanded', 'false');
 }
 
 function startReviewPolling(job) {
@@ -1455,6 +1494,7 @@ function suggestionTitle(suggestion, block) {
     return `Trocar o tipo: ${from} → ${to}`;
   }
   if (suggestion.op === 'ok') return 'A IA acha que este trecho está certo';
+  if (suggestion.op === 'insert_after') return 'Inserir, depois deste trecho, o texto que faltou';
   return OP_LABELS[suggestion.op] || suggestion.op;
 }
 
@@ -1473,7 +1513,9 @@ function renderSuggestion(block, wrapper) {
   head.className = 'ai__head';
   const badge = document.createElement('span');
   badge.className = 'ai__badge';
-  badge.textContent = 'IA';
+  // A revisão visual leu a imagem da página: o usuário sabe de onde veio.
+  badge.textContent = suggestion.source === 'visual' ? 'IA · página' : 'IA';
+  if (suggestion.source === 'visual') badge.title = `Comparado com a imagem da página ${block.page ?? ''} do PDF`;
   const title = document.createElement('b');
   title.textContent = suggestionTitle(suggestion, block);
   const confidence = document.createElement('span');
@@ -1491,6 +1533,14 @@ function renderSuggestion(block, wrapper) {
   }
   if (suggestion.op === 'fix_text' && suggestion.payload?.text) {
     card.append(changeExcerpt(block.text, suggestion.payload.text));
+  }
+  if (suggestion.op === 'insert_after' && suggestion.payload?.text) {
+    const line = document.createElement('p');
+    line.className = 'ai__diff';
+    const ins = document.createElement('ins');
+    ins.textContent = suggestion.payload.text;
+    line.append(ins);
+    card.append(line);
   }
   if (suggestion.problem) {
     const problem = document.createElement('p');
@@ -1643,7 +1693,8 @@ function renderReviewSheet() {
       text.textContent = (block?.text || '(bloco não existe mais)').replace(/<[^>]+>/g, '').slice(0, 90);
       const detail = document.createElement('span');
       detail.className = 'review-item__detail';
-      detail.textContent = [percent(suggestion.confidence), suggestion.problem || suggestion.reason]
+      const where = suggestion.source === 'visual' && block?.page ? `imagem da p. ${block.page}` : '';
+      detail.textContent = [percent(suggestion.confidence), where, suggestion.problem || suggestion.reason]
         .filter(Boolean).join(' · ');
       if (suggestion.problem || suggestion.confidence < threshold) item.dataset.below = 'true';
       go.append(text, detail);
@@ -2790,7 +2841,17 @@ function wire() {
 
   $('homeBtn').onclick = goHome;
   $('translateBtn').onclick = startTranslation;
-  $('reviewBtn').onclick = startReview;
+  $('reviewBtn').onclick = (event) => {
+    event.stopPropagation();
+    if ($('reviewMenu').hidden) openReviewMenu();
+    else closeReviewMenu();
+  };
+  $('reviewText').onclick = () => startReview({});
+  $('reviewPages').onclick = () => startReview({ mode: 'visual' });
+  $('reviewThisPage').onclick = () => {
+    const page = Number($('reviewThisPage').dataset.page);
+    if (page) startReview({ mode: 'visual', pages: [page] });
+  };
   $('reviewStop').onclick = stopReview;
   $('closeReview').onclick = closeReviewSheet;
   $('reviewSheet').onclick = (event) => { if (event.target === $('reviewSheet')) closeReviewSheet(); };
@@ -2817,7 +2878,10 @@ function wire() {
   $('exportOriginal').onclick = () => exportEpub(false);
   $('exportTranslated').onclick = () => exportEpub(true);
   document.addEventListener('click', (event) => {
-    if (!event.target.closest('.menu-anchor')) closeExportMenu();
+    if (!event.target.closest('.menu-anchor')) {
+      closeExportMenu();
+      closeReviewMenu();
+    }
   });
 
   $('stopBtn').onclick = async () => {
@@ -2882,6 +2946,7 @@ function openExportMenu() {
   $('exportTranslatedHint').textContent = translated
     ? 'O que não foi traduzido sai no original'
     : 'Nada traduzido ainda';
+  closeReviewMenu();
   $('exportMenu').hidden = false;
   $('exportBtn').setAttribute('aria-expanded', 'true');
   // Na etapa de tradução, o mais provável é querer o traduzido.

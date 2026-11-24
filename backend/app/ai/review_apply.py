@@ -10,7 +10,7 @@ Formato do review.json:
       "reviewed_at": "...", "provider": "...", "model": "...",
       "suggestions": [
         {"id", "chapter_id", "block_id", "op", "payload", "confidence",
-         "reason", "suspects", "fingerprint",
+         "reason", "suspects", "fingerprint", "source": "text" | "visual",
          "status": "pending" | "accepted" | "rejected" | "stale",
          "decided_by": "user" | "auto" | "", "decided_at", "problem"}
       ],
@@ -73,12 +73,14 @@ def record_review(
     *,
     provider: str = "",
     model: str = "",
+    source: str = "text",
 ) -> dict[str, int]:
     """Põe as propostas de uma revisão nova no review.json (alterado no lugar).
 
-    As sugestões pendentes de antes saem: a revisão nova as substitui. As
-    decididas ficam, como histórico. Uma proposta igual a uma já rejeitada
-    (mesma operação, mesmo dado, mesmo texto do bloco) não volta.
+    As sugestões pendentes de antes, da mesma origem, saem: a revisão nova as
+    substitui. Uma revisão visual não apaga as pendentes da de texto, nem o
+    contrário. As decididas ficam, como histórico. Uma proposta igual a uma já
+    rejeitada (mesma operação, mesmo dado, mesmo texto do bloco) não volta.
     """
     old = review.get("suggestions") or []
     rejected = {s.get("fingerprint") for s in old if s.get("status") == "rejected"}
@@ -97,6 +99,7 @@ def record_review(
         suggestion = {field: getattr(proposal, field) for field in _PROPOSAL_FIELDS}
         suggestion.update(
             id=new_id(),
+            source=source,
             fingerprint=mark,
             status="pending",
             decided_by="",
@@ -105,7 +108,8 @@ def record_review(
         )
         new.append(suggestion)
 
-    review["suggestions"] = [s for s in old if s.get("status") != "pending"] + new
+    kept = [s for s in old if s.get("status") != "pending" or s.get("source", "text") != source]
+    review["suggestions"] = kept + new
     review["reviewed_at"] = _now()
     review["provider"] = provider
     review["model"] = model
@@ -196,6 +200,8 @@ def apply(document: Document, suggestion: dict[str, Any]) -> None:
         editing.split_chapter(document, chapter.id, block_id)
     elif op == "merge_chapter":
         editing.merge_chapter(document, chapter.id)
+    elif op == "insert_after":
+        editing.insert_paragraph_after(document, block_id, payload["text"])
     else:
         raise editing.EditError(f"Operação desconhecida: {op}")
 
