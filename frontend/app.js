@@ -33,8 +33,6 @@ const state = {
   claudeTimer: null,
   // Último `claude auth status` lido, com a hora ({at, value}).
   claude: null,
-  // Entre abrir a janela de login e a conta aparecer.
-  claudeWaiting: false,
   jobId: null,
   jobTimer: null,
   // "convert" ou "translate": a etapa aberta (ver setStage).
@@ -322,7 +320,7 @@ async function loadImportOptions() {
     ? '"Todas as páginas" serve para PDFs cujo texto sai embaralhado ou com ' +
       'letras trocadas. O OCR leva cerca de 1 segundo por página.'
     : 'O Tesseract não está instalado: páginas escaneadas ficam sem texto. ' +
-      'O README explica como instalar (a imagem Docker já traz).';
+      'Reconstrua a imagem: docker compose up -d --build.';
 
   const langs = $('importLangs');
   langs.innerHTML = '';
@@ -1635,13 +1633,10 @@ function applyCatalogDefaults() {
 
 /* Claude pela assinatura. O login é do Claude Code, pelo fluxo da Anthropic:
    o Interlinear não pode intermediar o link nem o código, e nunca vê o token.
-   O que ele faz é dar a partida: "Entrar com a conta Claude" abre uma janela
-   de terminal desta máquina rodando o binário oficial, e daí em diante a
-   página só lê o `claude auth status` até a conta aparecer. Dentro do Docker
-   não há janela para abrir, e aí o caminho continua sendo a aba Exec. */
+   O usuário entra pelo container (aba Exec do Docker Desktop, ou docker exec),
+   e a página só lê o `claude auth status` até a conta aparecer. */
 
 const CLAUDE_LOGIN = 'claude auth login';
-const CLAUDE_LOGIN_LABEL = 'Entrar com a conta Claude';
 
 // Cada `claude auth status` roda um processo. O painel e a lista de provedores
 // perguntam juntos, então o resultado vale por alguns segundos.
@@ -1679,7 +1674,6 @@ async function checkClaude() {
   if (claude.logged_in && claude.subscription) {
     // Só avisa se a página estava esperando: no primeiro desenho, não.
     if (state.claudeTimer) toast(`Claude conectado${planText(claude.plan)}.`);
-    state.claudeWaiting = false;
     stopClaudePolling();
     paintClaudeBadges();
   } else if (claude.installed) {
@@ -1756,27 +1750,19 @@ function renderClaudePanel(claude) {
             (soon ? '. Expira em breve: entre de novo do mesmo jeito para renovar.' : '.')
         );
       }
-      if (claude.docker) {
-        line(
-          'O login fica no volume interlinear-claude e sobrevive a rebuilds. ' +
-            'Só o docker compose down -v apaga.'
-        );
-      }
+      line(
+        'O login fica no volume interlinear-claude e sobrevive a rebuilds. ' +
+          'Só o docker compose down -v apaga.'
+      );
       return;
     }
 
     box.dataset.state = 'todo';
     if (!claude.installed) {
-      status(
-        claude.docker
-          ? 'Esta imagem do Interlinear foi construída sem o Claude Code.'
-          : 'O Claude Code não está instalado nesta máquina.'
-      );
+      status('Esta imagem do Interlinear foi construída sem o Claude Code.');
       line(
-        claude.docker
-          ? 'Ponha INTERLINEAR_WITH_CLAUDE=1 no arquivo .env ao lado do compose.yaml e ' +
-              'reconstrua: docker compose up -d --build.'
-          : 'Instale pelo site claude.com/claude-code e volte aqui.'
+        'Ponha INTERLINEAR_WITH_CLAUDE=1 no arquivo .env ao lado do compose.yaml e ' +
+          'reconstrua: docker compose up -d --build.'
       );
       return;
     }
@@ -1786,60 +1772,23 @@ function renderClaudePanel(claude) {
       return;
     }
 
-    // Logado, mas por chave de API: dá para entrar, só precisa sair antes — e
-    // quem faz isso é o próprio script que a janela roda.
+    // Logado, mas por chave de API: dá para entrar, só precisa sair antes, e o
+    // comando dos passos já faz isso.
     const apiKey = Boolean(claude.logged_in);
-
-    if (state.claudeWaiting) {
-      box.dataset.state = 'busy';
-      status('Esperando você entrar na janela do terminal…');
-      line(
-        'Autorize na página da Anthropic que o Claude Code abriu. Esta tela avisa ' +
-          'sozinha quando a conta entrar.'
-      );
-    } else {
-      status(
-        apiKey
-          ? 'O Claude Code está usando uma chave de API, não a assinatura.'
-          : 'Não conectado: falta entrar com a sua conta Claude.'
-      );
-      line(
-        apiKey
-          ? 'Para usar a chave, cadastre o provedor Anthropic. Para usar a assinatura, ' +
-              'entre com a conta Claude.'
-          : 'É uma vez só, e vale para todos os livros.'
-      );
-    }
-
-    // Fora do Docker dá para abrir a janela daqui; dentro, não existe janela
-    // para abrir, e o login é feito pelo container.
-    if (claude.can_open_terminal) {
-      if (!state.claudeWaiting) {
-        box.append(claudeLoginButton());
-        line(
-          'Abre uma janela de terminal nesta máquina e a página da Anthropic no ' +
-            'navegador. O código de autorização fica entre o Claude Code e a Anthropic: ' +
-            'o Interlinear não vê o seu login.'
-        );
-      }
-      const details = document.createElement('details');
-      details.className = 'connect__fallback';
-      const summary = document.createElement('summary');
-      summary.textContent = 'Prefiro fazer pelo terminal';
-      details.append(summary, claudeSteps(claude));
-      box.append(details);
-      return;
-    }
-
-    if (claude.docker) {
-      line(
-        'O Interlinear está rodando dentro do Docker, e de lá não dá para abrir uma ' +
-          'janela na sua área de trabalho. O login é feito pelo container, uma vez só:',
-        'connect__notice'
-      );
-    }
+    status(
+      apiKey
+        ? 'O Claude Code está usando uma chave de API, não a assinatura.'
+        : 'Não conectado: falta entrar com a sua conta Claude.'
+    );
+    line(
+      apiKey
+        ? 'Para usar a chave, cadastre o provedor Anthropic. Para usar a assinatura, ' +
+            'entre com a conta Claude.'
+        : 'É uma vez só, e vale para todos os livros. O login é feito pelo container:',
+      apiKey ? 'field__hint' : 'connect__notice'
+    );
     box.append(claudeSteps(claude));
-    if (claude.docker) line(`Ou, num terminal: docker exec -it interlinear ${CLAUDE_LOGIN}`);
+    line(`Ou, num terminal: docker exec -it interlinear ${CLAUDE_LOGIN}`);
     line('Esta página confere sozinha e avisa quando você entrar.', 'field__hint connect__waiting');
   };
 
@@ -1850,31 +1799,7 @@ function renderClaudePanel(claude) {
   line(`Lido do Claude Code às ${read.toLocaleTimeString('pt-BR')}.`, 'connect__stamp');
 }
 
-function claudeLoginButton() {
-  const button = document.createElement('button');
-  button.className = 'btn btn--primary connect__login';
-  button.textContent = CLAUDE_LOGIN_LABEL;
-  button.onclick = async () => {
-    button.disabled = true;
-    button.textContent = 'Abrindo…';
-    try {
-      const { claude } = await api('/api/claude/login', { method: 'POST' });
-      state.claudeWaiting = true;
-      state.claude = { at: Date.now(), value: claude };
-      toast('Abri uma janela de terminal. Autorize na página da Anthropic.');
-      renderClaudePanel(claude);
-      startClaudePolling();
-    } catch (error) {
-      button.disabled = false;
-      button.textContent = CLAUDE_LOGIN_LABEL;
-      toast(error.message, 'error');
-    }
-  };
-  return button;
-}
-
-// O caminho manual, que continua valendo: no Docker é o único, e fora dele
-// fica guardado atrás de "Prefiro fazer pelo terminal".
+// Os passos para entrar pelo container.
 function claudeSteps(claude) {
   const command = claude.logged_in ? `claude auth logout && ${CLAUDE_LOGIN}` : CLAUDE_LOGIN;
   const steps = document.createElement('ol');
@@ -1885,7 +1810,7 @@ function claudeSteps(claude) {
     steps.append(li);
   };
 
-  if (claude.docker) step('No Docker Desktop, abra Containers → interlinear → aba Exec.');
+  step('No Docker Desktop, abra Containers → interlinear → aba Exec.');
   const code = document.createElement('code');
   code.textContent = command;
   const copy = document.createElement('button');
@@ -1899,10 +1824,10 @@ function claudeSteps(claude) {
       toast(`Copie o comando: ${command}`);
     }
   };
-  step(claude.docker ? 'Rode ' : 'Num terminal, rode ', code, ' ', copy);
+  step('Rode ', code, ' ', copy);
   step(
     'Escolha a conta Claude, autorize na página da Anthropic e cole o código que ela ' +
-      `mostrar de volta no ${claude.docker ? 'Exec' : 'terminal'}.`
+      'mostrar de volta no Exec.'
   );
   return steps;
 }

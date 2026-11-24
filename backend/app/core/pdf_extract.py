@@ -597,6 +597,7 @@ def _column_starts(cells: list[Line]) -> list[float]:
     """Onde começa cada coluna da tabela: os x0 das células, agrupados."""
     size = statistics.median(line.size for line in cells)
     starts: list[float] = []
+    last = 0.0
     for x0 in sorted(line.x0 for line in cells):
         if not starts or x0 - last > size * 1.5:
             starts.append(x0)
@@ -625,7 +626,7 @@ def _reading_order(lines: list[Line], images: list[PageImage]) -> list[Line]:
     in_table = {id(line) for table in tables for line in table}
     text = [line for line in lines if id(line) not in in_table]
     boxes = [
-        (min(l.top for l in t), min(l.x0 for l in t), max(l.x1 for l in t)) for t in tables
+        (min(c.top for c in t), min(c.x0 for c in t), max(c.x1 for c in t)) for t in tables
     ]
 
     gutter = _find_gutter(text)
@@ -662,7 +663,7 @@ def _reading_order(lines: list[Line], images: list[PageImage]) -> list[Line]:
         for line in table:
             line.table = number
             line.column = table_key[1] if gutter is not None else 0
-        placements.append((at, table_key, sorted(table, key=lambda l: (l.top, l.x0))))
+        placements.append((at, table_key, sorted(table, key=lambda c: (c.top, c.x0))))
     placements.sort(key=lambda placement: placement[:2])
 
     lines = []
@@ -1143,8 +1144,8 @@ def _add_ocr_lines(
         if not lines:
             raise ValueError(
                 "Nenhum texto extraível encontrado. O PDF provavelmente é "
-                "escaneado e precisa de OCR: instale o Tesseract (a imagem Docker "
-                "já traz) e importe de novo."
+                "escaneado e precisa de OCR, mas o Tesseract não foi encontrado na "
+                "imagem. Reconstrua com docker compose up -d --build e importe de novo."
             )
         # PDF misto: o texto que há vale mais que recusar o livro inteiro.
         report.scanned_without_ocr = list(pages)
@@ -1236,13 +1237,13 @@ def _image_blocks(
     """
     pages_by_hash: dict[str, set[int]] = {}
     for image in page_images:
-        digest = hashlib.sha1(image.data).hexdigest()
+        digest = hashlib.sha1(image.data, usedforsecurity=False).hexdigest()
         pages_by_hash.setdefault(digest, set()).add(image.page)
 
     kept: list[tuple[int, float, Block]] = []
     names_by_hash: dict[str, str] = {}
     for image in sorted(page_images, key=lambda i: (i.page, i.flow, i.top)):
-        digest = hashlib.sha1(image.data).hexdigest()
+        digest = hashlib.sha1(image.data, usedforsecurity=False).hexdigest()
         if len(pages_by_hash[digest]) >= REPEATED_IMAGE_PAGES:
             continue
         # A mesma figura repetida poucas vezes vira um arquivo só.

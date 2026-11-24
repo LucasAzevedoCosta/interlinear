@@ -1,6 +1,17 @@
-# Imagem do Interlinear. Todas as dependências têm wheels prontos para
-# linux/amd64 e linux/arm64, então não é preciso compilador.
-FROM python:3.12-slim
+# Imagem do Interlinear. O Interlinear só roda em container: este arquivo é a
+# única forma de executar o app, os testes e as ferramentas de qualidade.
+#
+# Três estágios:
+#   base     sistema, Tesseract, usuário sem privilégios e dependências
+#   dev      base + dependências de desenvolvimento e o código com os testes
+#            (docker compose run --rm dev pytest; é o que a CI roda)
+#   runtime  base + só o código da aplicação. É o último, então é o padrão do
+#            `docker build` e do compose.
+#
+# Todas as dependências têm wheels prontos para linux/amd64 e linux/arm64,
+# então não é preciso compilador.
+
+FROM python:3.12-slim AS base
 
 # 1 instala o Claude Code, para traduzir pela assinatura do Claude
 # (experimental, ~350 MB a mais). Veja docs/provedores.md.
@@ -12,9 +23,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_ROOT_USER_ACTION=ignore \
     INTERLINEAR_DATA_DIR=/data \
-    INTERLINEAR_OPEN_BROWSER=0 \
-    INTERLINEAR_DOCKER=1 \
     CLAUDE_CONFIG_DIR=/claude \
     DISABLE_AUTOUPDATER=1 \
     PATH=/home/interlinear/.local/bin:$PATH
@@ -49,12 +59,38 @@ USER root
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
+VOLUME ["/data"]
+
+
+# --------------------------------------------------------------------------
+FROM base AS dev
+
+# Ferramentas de teste e de qualidade (pytest, ruff, pip-audit, bandit).
+COPY requirements-dev.txt .
+RUN pip install -r requirements-dev.txt
+
+# O código vai junto para a imagem funcionar sozinha na CI. No dia a dia, o
+# compose monta a pasta do projeto por cima, só para leitura: nada que os
+# testes ou o servidor gerem vai parar no seu computador.
+COPY pyproject.toml ./
+COPY backend/ backend/
+COPY frontend/ frontend/
+COPY tests/ tests/
+
+ENV RUFF_CACHE_DIR=/tmp/ruff-cache
+
+USER interlinear
+CMD ["pytest"]
+
+
+# --------------------------------------------------------------------------
+FROM base AS runtime
+
 COPY backend/ backend/
 COPY frontend/ frontend/
 
 USER interlinear
 
-VOLUME ["/data"]
 EXPOSE 8000
 
 WORKDIR /app/backend

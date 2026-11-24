@@ -52,7 +52,7 @@ _BBOX = re.compile(r"bbox\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)")
 
 
 def tesseract_path() -> str | None:
-    return shutil.which(os.environ.get("INTERLINEAR_TESSERACT", "tesseract"))
+    return shutil.which("tesseract")
 
 
 def available() -> bool:

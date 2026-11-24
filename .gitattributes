@@ -2,10 +2,8 @@
 # quem faz o commit.
 * text=auto
 
-# O run.sh roda no bash (inclusive WSL e Git Bash): com CRLF ele quebra.
+# Tudo roda dentro do container Linux: scripts com CRLF quebram lá dentro.
 *.sh text eol=lf
-# O run.ps1 roda no PowerShell, que prefere CRLF.
-*.ps1 text eol=crlf
 
 *.png binary
 *.pdf binary

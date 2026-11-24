@@ -115,7 +115,7 @@ def test_tamanho_do_corpo_absorve_o_ruido_do_ocr():
 
     lines = [line(s) for s in (12.0, 11.5, 12.5, 12.0, 13.0, 20.0)]
     ocr._snap_body_size(lines)
-    assert [l.size for l in lines] == [12.0, 12.0, 12.0, 12.0, 12.0, 20.0]
+    assert [item.size for item in lines] == [12.0, 12.0, 12.0, 12.0, 12.0, 20.0]
 
 
 def test_margem_com_ruido_nao_perde_para_o_recuo():
@@ -132,7 +132,7 @@ def test_margem_com_ruido_nao_perde_para_o_recuo():
         line(66.2, 244, "j"), line(50.2, 260, "k"),
     ]
     groups = _group_into_paragraphs(lines, 11.0)
-    assert [[l.text for l in g] for g in groups] == [
+    assert [[item.text for item in g] for g in groups] == [
         ["a"], ["b", "c", "d"], ["e", "f"], ["g", "h", "i"], ["j", "k"],
     ]
 
@@ -148,7 +148,6 @@ def test_sem_tesseract_explica_o_que_fazer(tmp_path, monkeypatch):
         extract_blocks(str(path))
 
 
-@pytest.mark.skipif(not ocr.available(), reason="Tesseract não instalado")
 def test_pdf_escaneado_passa_pelo_ocr(tmp_path):
     path = tmp_path / "escaneado.pdf"
     _scanned(path)
@@ -179,7 +178,7 @@ def test_corpo_do_ocr_vira_o_corpo_do_pdf():
 
     lines = [line(s) for s in (12.0, 11.5, 12.0, 18.0)]
     ocr._snap_body_size(lines, 10.0)
-    assert [l.size for l in lines] == [10.0, 10.0, 10.0, 15.0]
+    assert [item.size for item in lines] == [10.0, 10.0, 10.0, 15.0]
 
 
 def test_pdf_misto_sem_tesseract_fica_com_o_texto_e_avisa(tmp_path, monkeypatch):
@@ -231,7 +230,6 @@ def test_excecao_no_progresso_cancela_a_extracao(tmp_path):
     assert seen == [1, 2]  # a terceira página nem é lida
 
 
-@pytest.mark.skipif(not ocr.available(), reason="Tesseract não instalado")
 def test_pdf_misto_faz_ocr_so_das_paginas_escaneadas(tmp_path):
     path = tmp_path / "misto.pdf"
     _scanned(path, pages=3, native=(1, 3))
@@ -256,7 +254,6 @@ def test_pdf_misto_faz_ocr_so_das_paginas_escaneadas(tmp_path):
     assert not images
 
 
-@pytest.mark.skipif(not ocr.available(), reason="Tesseract não instalado")
 def test_ocr_forcado_ignora_o_texto_do_pdf(tmp_path):
     path = tmp_path / "nativo.pdf"
     _scanned(path, pages=1, native=(1,))

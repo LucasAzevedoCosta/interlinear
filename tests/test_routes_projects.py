@@ -33,13 +33,8 @@ def client(tmp_path, monkeypatch):
 
 
 @pytest.fixture(scope="module")
-def pdf_bytes() -> bytes:
-    from make_fixture import gerar
-
-    destino = ROOT / "tests" / "fixtures" / "livro_teste.pdf"
-    if not destino.exists():
-        gerar(destino)
-    return destino.read_bytes()
+def pdf_bytes(livro_pdf: Path) -> bytes:
+    return livro_pdf.read_bytes()
 
 
 def test_importa_pdf_e_exporta_epub(client, pdf_bytes):

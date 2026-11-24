@@ -17,19 +17,14 @@ import asyncio
 import json
 import os
 import re
-import shlex
 import shutil
-import subprocess
-import sys
 import tempfile
 import time
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import httpx
 
-from ..config import data_root
 from .base import (
     Completion,
     Message,
@@ -44,10 +39,10 @@ from .base import (
     newest_first,
 )
 
-# Servidores locais. Dentro de um container, "localhost" é o próprio container,
-# então o Docker aponta essas variáveis para host.docker.internal.
-OLLAMA_URL = os.environ.get("INTERLINEAR_OLLAMA_URL", "http://localhost:11434/v1")
-LMSTUDIO_URL = os.environ.get("INTERLINEAR_LMSTUDIO_URL", "http://localhost:1234/v1")
+# Servidores locais, rodando no computador fora do container. Lá dentro,
+# "localhost" é o próprio container; host.docker.internal é o computador.
+OLLAMA_URL = os.environ.get("INTERLINEAR_OLLAMA_URL", "http://host.docker.internal:11434/v1")
+LMSTUDIO_URL = os.environ.get("INTERLINEAR_LMSTUDIO_URL", "http://host.docker.internal:1234/v1")
 
 # Modelos que não geram texto de conversa e só poluem o seletor: embeddings,
 # áudio, imagem, moderação e os antigos de completar texto.
@@ -397,22 +392,15 @@ _LOGIN_WORDS = ("/login", "not logged in", "invalid api key", "please log in")
 
 
 def claude_path() -> str | None:
-    return shutil.which(os.environ.get("INTERLINEAR_CLAUDE", "claude"))
-
-
-def in_docker() -> bool:
-    """A imagem do Interlinear marca o ambiente; o login lá é pelo Docker Desktop."""
-    return os.environ.get("INTERLINEAR_DOCKER") == "1"
+    return shutil.which("claude")
 
 
 def claude_login_hint() -> str:
-    if in_docker():
-        return (
-            "No Docker Desktop, abra o container interlinear, aba Exec, e rode "
-            "`claude auth login` (ou, no terminal, `docker exec -it interlinear "
-            "claude auth login`)."
-        )
-    return "Rode `claude auth login` no terminal e entre com a sua conta Claude."
+    return (
+        "No Docker Desktop, abra o container interlinear, aba Exec, e rode "
+        "`claude auth login` (ou, no terminal, `docker exec -it interlinear "
+        "claude auth login`)."
+    )
 
 
 def claude_executable() -> str:
@@ -421,10 +409,7 @@ def claude_executable() -> str:
     if path is None:
         raise ProviderError(
             "Esta imagem do Interlinear foi construída sem o Claude Code. Reconstrua "
-            "com INTERLINEAR_WITH_CLAUDE=1 (veja docs/provedores.md)."
-            if in_docker()
-            else "Claude Code não encontrado. Instale (claude.com/claude-code) e "
-            "entre com a sua conta.",
+            "com INTERLINEAR_WITH_CLAUDE=1 (veja docs/provedores.md).",
             fatal=True,
         )
     return path
@@ -600,149 +585,6 @@ def _reset_time(message: str, now: float | None = None) -> float | None:
     return None
 
 
-# --------------------------------------------------------------------------
-# Entrar: abrir o Claude Code numa janela de terminal do usuário
-# --------------------------------------------------------------------------
-
-# Emuladores de terminal conhecidos, com o jeito de cada um receber o comando.
-_LINUX_TERMINALS: list[tuple[str, list[str]]] = [
-    ("x-terminal-emulator", ["-e"]),
-    ("gnome-terminal", ["--"]),
-    ("konsole", ["-e"]),
-    ("xfce4-terminal", ["-e"]),
-    ("kitty", []),
-    ("alacritty", ["-e"]),
-    ("xterm", ["-e"]),
-]
-
-# Dois cliques no botão não devem encher a tela de janelas.
-_LOGIN_COOLDOWN = 3.0
-_login_opened_at = 0.0
-
-
-def terminal_launcher() -> list[str] | None:
-    """Começo do comando que abre uma janela de terminal, ou None se não houver.
-
-    Dentro do Docker não existe janela para abrir: o container não alcança a
-    área de trabalho de quem está usando. Lá o caminho continua sendo o Exec.
-    """
-    if in_docker():
-        return None
-    if sys.platform == "darwin":
-        return ["open", "-a", "Terminal"]
-    if sys.platform == "win32":
-        # O primeiro argumento do `start` é o título da janela.
-        return ["cmd", "/c", "start", "Entrar no Claude"]
-    for name, prefix in _LINUX_TERMINALS:
-        if path := shutil.which(name):
-            return [path, *prefix]
-    return None
-
-
-def _write_login_script(claude: str, *, relogin: bool) -> Path:
-    """Grava o script que a janela de terminal vai rodar.
-
-    É um script, e não o comando direto, por três motivos: o caminho do Claude
-    Code pode ter espaço, o `open` do macOS não repassa argumentos, e a janela
-    precisa ficar aberta depois do login para o usuário ler o resultado.
-
-    Nada aqui vem do navegador: o único dado variável é o caminho do próprio
-    Claude Code, achado no PATH.
-    """
-    folder = data_root()
-    folder.mkdir(parents=True, exist_ok=True)
-
-    if sys.platform == "win32":
-        # Sem acentos: o console do Windows lê o .bat na página de código dele.
-        script = folder / "entrar-no-claude.bat"
-        script.write_text(
-            "@echo off\r\n"
-            "rem Gerado pelo Interlinear para abrir o login do Claude Code.\r\n"
-            "rem Quem pede e recebe o codigo e o Claude Code, pelo fluxo da\r\n"
-            "rem Anthropic: o Interlinear nao ve nada disso.\r\n"
-            + (f'"{claude}" auth logout\r\n' if relogin else "")
-            + f'"{claude}" auth login\r\n'
-            "echo.\r\n"
-            "pause\r\n",
-            encoding="utf-8",
-        )
-    else:
-        script = folder / "entrar-no-claude.command"
-        quoted = shlex.quote(claude)
-        script.write_text(
-            "#!/bin/sh\n"
-            "# Gerado pelo Interlinear para abrir o login do Claude Code.\n"
-            "# Quem pede e recebe o código é o Claude Code, pelo fluxo da\n"
-            "# Anthropic: o Interlinear não vê nada disso.\n"
-            + (f"{quoted} auth logout\n" if relogin else "")
-            + f"{quoted} auth login\n"
-            'printf "\\n--- Pronto. Pode fechar esta janela. ---\\n"\n'
-            "read -r _\n",
-            encoding="utf-8",
-        )
-
-    script.chmod(0o700)
-    return script
-
-
-async def claude_login_terminal() -> dict[str, Any]:
-    """Abre o login do Claude Code numa janela de terminal desta máquina.
-
-    O Interlinear não participa do login: ele só dá a partida no binário
-    oficial, numa janela que é do usuário — como um atalho na área de
-    trabalho. O link e o código ficam entre o Claude Code e a Anthropic, e
-    não passam por aqui. É o que separa isto de oferecer login do Claude.ai,
-    que a Anthropic proíbe a terceiros (docs/provedores.md).
-    """
-    global _login_opened_at
-
-    claude = claude_executable()
-    launcher = terminal_launcher()
-    if launcher is None:
-        raise ProviderError(
-            f"O Interlinear não consegue abrir uma janela de terminal daqui. {claude_login_hint()}",
-            fatal=True,
-        )
-
-    now = time.time()
-    if now - _login_opened_at < _LOGIN_COOLDOWN:
-        return {"terminal": "", "already_open": True}
-
-    # Entrar com a assinatura por cima de um login por chave de API exige sair
-    # antes. Se o status não responder, tenta só entrar.
-    relogin = False
-    try:
-        data = await ClaudeCliProvider(ProviderConfig(kind="claude_cli")).auth_status()
-        relogin = bool(data.get("loggedIn")) and data.get("authMethod") != "claude.ai"
-    except ProviderError:
-        pass
-
-    script = _write_login_script(claude, relogin=relogin)
-
-    def spawn() -> subprocess.Popen:
-        return subprocess.Popen(
-            [*launcher, str(script)],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-
-    process = await asyncio.to_thread(spawn)
-    # `open` e `start` saem na hora; um emulador de terminal fica vivo junto
-    # com a janela. Código diferente de zero é o lançador falhando, e aí nada
-    # abriu — o painel volta a ensinar o caminho do terminal.
-    await asyncio.sleep(0.4)
-    if process.poll() not in (None, 0):
-        raise ProviderError(
-            f"A janela de terminal não abriu ({Path(launcher[0]).name}). {claude_login_hint()}",
-            fatal=True,
-        )
-
-    _login_opened_at = now
-    return {"terminal": Path(launcher[0]).name, "already_open": False}
-
-
 async def claude_status() -> dict[str, Any]:
     """Estado do Claude Code para o painel "Conectar" das configurações.
 
@@ -752,9 +594,6 @@ async def claude_status() -> dict[str, Any]:
     installed = claude_path() is not None
     status: dict[str, Any] = {
         "installed": installed,
-        "docker": in_docker(),
-        # Se dá para entrar por um clique no site, ou se o caminho é o terminal.
-        "can_open_terminal": installed and terminal_launcher() is not None,
         "logged_in": False,
         "subscription": False,
         "plan": "",

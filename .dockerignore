@@ -1,15 +1,13 @@
 .git
 .gitignore
 .claude
-.venv
-venv
 **/__pycache__
 **/*.py[cod]
 .pytest_cache
+.ruff_cache
 *.egg-info
 dist
 build
-tests
 docs
 data
 dados

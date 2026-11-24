@@ -14,12 +14,9 @@ from __future__ import annotations
 import json
 import os
 import stat
-import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
-
-APP_NAME = "interlinear"
 
 _ENV_KEYS = {
     "openai": "INTERLINEAR_OPENAI_KEY",
@@ -30,19 +27,8 @@ _ENV_KEYS = {
 
 
 def data_root() -> Path:
-    """Pasta de dados. Respeita INTERLINEAR_DATA_DIR quando definida."""
-    override = os.environ.get("INTERLINEAR_DATA_DIR")
-    if override:
-        return Path(override).expanduser()
-
-    # O lugar convencional muda por sistema: Application Support no macOS,
-    # %APPDATA% no Windows e XDG no resto. os.uname() não existe no Windows.
-    home = Path.home()
-    if sys.platform == "darwin":
-        return home / "Library" / "Application Support" / APP_NAME
-    if sys.platform == "win32":
-        return Path(os.environ.get("APPDATA", home / "AppData" / "Roaming")) / APP_NAME
-    return Path(os.environ.get("XDG_DATA_HOME", home / ".local" / "share")) / APP_NAME
+    """Pasta de dados: o volume /data do container, ou INTERLINEAR_DATA_DIR."""
+    return Path(os.environ.get("INTERLINEAR_DATA_DIR", "/data")).expanduser()
 
 
 @dataclass

@@ -1,6 +1,6 @@
 """Claude pela assinatura: o provedor que roda o Claude Code (`claude -p`).
 
-Um `claude` falso, apontado por INTERLINEAR_CLAUDE, faz o papel da CLI: grava
+Um `claude` falso, posto na frente do PATH, faz o papel da CLI: grava
 os argumentos e o ambiente com que foi chamado e responde conforme FAKE_MODE.
 """
 
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import time
 from datetime import datetime
@@ -67,7 +68,7 @@ def cli(tmp_path, monkeypatch):
     script.write_text(FAKE_CLI.format(python=sys.executable))
     script.chmod(0o755)
     log = tmp_path / "calls.jsonl"
-    monkeypatch.setenv("INTERLINEAR_CLAUDE", str(script))
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
     monkeypatch.setenv("FAKE_LOG", str(log))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-nao-deve-ser-usada")
 
@@ -161,9 +162,9 @@ def test_cli_que_nao_responde_e_interrompida(cli, monkeypatch):
     assert error.value.retryable
 
 
-def test_sem_claude_code_instalado(monkeypatch):
-    monkeypatch.setenv("INTERLINEAR_CLAUDE", "/nao/existe/claude")
-    with pytest.raises(ProviderError, match="Claude Code não encontrado") as error:
+def test_sem_claude_code_instalado(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", str(tmp_path / "sem-claude"))
+    with pytest.raises(ProviderError, match="construída sem o Claude Code") as error:
         _complete(_provider())
     assert error.value.fatal
 
@@ -231,14 +232,10 @@ def _status(api) -> dict:
     return api.get("/api/claude/status").json()["claude"]
 
 
-def test_status_logado_mostra_plano_e_validade(cli, api, monkeypatch):
-    monkeypatch.setenv("INTERLINEAR_DOCKER", "1")
+def test_status_logado_mostra_plano_e_validade(cli, api):
     status = _status(api)
     assert status == {
         "installed": True,
-        "docker": True,
-        # No Docker não há janela para abrir: o caminho é a aba Exec.
-        "can_open_terminal": False,
         "logged_in": True,
         "subscription": True,
         "plan": "max",
@@ -259,15 +256,13 @@ def test_status_sem_a_assinatura(cli, api, monkeypatch, mode, logged_in, subscri
     assert (status["logged_in"], status["subscription"]) == (logged_in, subscription)
 
 
-def test_status_sem_claude_code(api, monkeypatch):
-    monkeypatch.setenv("INTERLINEAR_CLAUDE", "/nao/existe/claude")
-    monkeypatch.delenv("INTERLINEAR_DOCKER", raising=False)
+def test_status_sem_claude_code(api, tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", str(tmp_path / "sem-claude"))
     status = _status(api)
-    assert (status["installed"], status["docker"], status["logged_in"]) == (False, False, False)
+    assert (status["installed"], status["logged_in"]) == (False, False)
 
 
-def test_deslogado_no_docker_ensina_o_caminho_do_docker_desktop(cli, monkeypatch):
-    monkeypatch.setenv("INTERLINEAR_DOCKER", "1")
+def test_deslogado_ensina_o_caminho_do_docker_desktop(cli, monkeypatch):
     monkeypatch.setenv("FAKE_MODE", "logged_out")
     with pytest.raises(ProviderError, match="aba Exec"):
         _complete(_provider())
@@ -294,115 +289,6 @@ def test_testar_conexao_mostra_o_plano(cli, tmp_path, monkeypatch):
     assert result["ok"] and result["plan"] == "max"
     assert [m["id"] for m in models] == ["haiku", "sonnet", "opus"]
     assert all(m["note"] for m in models)
-
-
-# --------------------------------------------------------------------------
-# Entrar: a janela de terminal que o botão do site abre
-# --------------------------------------------------------------------------
-
-# Faz o papel do Terminal.app (ou do gnome-terminal): só anota o que recebeu.
-FAKE_TERMINAL = r"""#!{python}
-import os, sys
-with open(os.environ["FAKE_TERMINAL_LOG"], "a") as out:
-    out.write("\t".join(sys.argv[1:]) + "\n")
-"""
-
-
-@pytest.fixture
-def terminal(tmp_path, monkeypatch):
-    """Um terminal falso no lugar do do sistema, e o Docker desligado."""
-    from app.ai import providers
-
-    launcher = tmp_path / "terminal-falso"
-    launcher.write_text(FAKE_TERMINAL.format(python=sys.executable))
-    launcher.chmod(0o755)
-    log = tmp_path / "terminal.log"
-    monkeypatch.setenv("FAKE_TERMINAL_LOG", str(log))
-    monkeypatch.delenv("INTERLINEAR_DOCKER", raising=False)
-    monkeypatch.setattr(providers, "terminal_launcher", lambda: [str(launcher)])
-    # O guarda contra cliques repetidos é global ao processo.
-    monkeypatch.setattr(providers, "_login_opened_at", 0.0)
-
-    def opened() -> list[str]:
-        return log.read_text().splitlines() if log.exists() else []
-
-    return opened
-
-
-def _login_script(tmp_path) -> Path:
-    name = "entrar-no-claude.bat" if sys.platform == "win32" else "entrar-no-claude.command"
-    return tmp_path / "dados" / name
-
-
-# O que segura a janela aberta depois do login, para o usuário ler o resultado.
-PAUSE = "pause" if sys.platform == "win32" else "read -r _"
-
-
-def test_botao_abre_o_login_do_claude_code_numa_janela(cli, api, terminal, tmp_path):
-    body = api.post("/api/claude/login").json()
-
-    assert body["login"]["already_open"] is False
-    # A janela foi aberta com o script, e o script chama o binário oficial.
-    script = _login_script(tmp_path)
-    assert terminal() == [str(script)]
-    content = script.read_text()
-    assert "auth login" in content and "auth logout" not in content
-    # A janela não pode fechar sozinha: o usuário precisa ler o resultado.
-    assert PAUSE in content
-    # Abrir a janela não fala com o modelo: só o status, para saber se precisa sair antes.
-    assert [c["args"][:2] for c in cli()] == [["auth", "status"], ["auth", "status"]]
-
-
-def test_status_diz_que_da_para_entrar_por_aqui(cli, api, terminal):
-    assert _status(api)["can_open_terminal"] is True
-
-
-def test_dois_cliques_nao_abrem_duas_janelas(cli, api, terminal):
-    first = api.post("/api/claude/login").json()["login"]
-    second = api.post("/api/claude/login").json()["login"]
-
-    assert (first["already_open"], second["already_open"]) == (False, True)
-    assert len(terminal()) == 1
-
-
-def test_entrar_por_cima_de_chave_de_api_sai_antes(cli, api, terminal, tmp_path, monkeypatch):
-    monkeypatch.setenv("FAKE_MODE", "api_key")
-
-    api.post("/api/claude/login")
-
-    assert "auth logout" in _login_script(tmp_path).read_text()
-
-
-def test_no_docker_o_botao_nao_existe_e_a_rota_manda_para_o_exec(cli, api, monkeypatch):
-    monkeypatch.setenv("INTERLINEAR_DOCKER", "1")
-
-    assert _status(api)["can_open_terminal"] is False
-    response = api.post("/api/claude/login")
-    assert response.status_code == 400
-    assert "aba Exec" in response.json()["detail"]
-
-
-def test_entrar_sem_claude_code_instalado(api, terminal, monkeypatch):
-    monkeypatch.setenv("INTERLINEAR_CLAUDE", "/nao/existe/claude")
-
-    response = api.post("/api/claude/login")
-
-    assert response.status_code == 400
-    assert "Claude Code não encontrado" in response.json()["detail"]
-    assert terminal() == []
-
-
-def test_sem_terminal_para_abrir_ensina_o_comando(cli, api, monkeypatch):
-    from app.ai import providers
-
-    monkeypatch.delenv("INTERLINEAR_DOCKER", raising=False)
-    monkeypatch.setattr(providers, "terminal_launcher", lambda: None)
-    monkeypatch.setattr(providers, "_login_opened_at", 0.0)
-
-    response = api.post("/api/claude/login")
-
-    assert response.status_code == 400
-    assert "claude auth login" in response.json()["detail"]
 
 
 def test_perfil_da_assinatura_nao_guarda_chave(api):

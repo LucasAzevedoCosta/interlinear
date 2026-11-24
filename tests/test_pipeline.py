@@ -24,13 +24,8 @@ from app.core.structure import split_into_chapters  # noqa: E402
 
 
 @pytest.fixture(scope="module")
-def pdf_path() -> Path:
-    from make_fixture import gerar
-
-    destino = ROOT / "tests" / "fixtures" / "livro_teste.pdf"
-    if not destino.exists():
-        gerar(destino)
-    return destino
+def pdf_path(livro_pdf: Path) -> Path:
+    return livro_pdf
 
 
 @pytest.fixture(scope="module")

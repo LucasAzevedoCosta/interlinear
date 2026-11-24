@@ -2,25 +2,30 @@ name: interlinear
 
 services:
   interlinear:
+    # A imagem publicada a cada versão (veja o README). Sem ela no computador,
+    # `docker compose up -d` baixa; com `--build`, constrói a partir do código.
+    # INTERLINEAR_IMAGE_TAG=claude escolhe a imagem que já traz o Claude Code.
+    image: ghcr.io/lucasazevedocosta/interlinear:${INTERLINEAR_IMAGE_TAG:-latest}
     build:
       context: .
+      target: runtime
       args:
         # 1 inclui o Claude Code, para traduzir pela assinatura do Claude
         # (experimental, ~350 MB a mais). Veja docs/provedores.md.
         INTERLINEAR_WITH_CLAUDE: ${INTERLINEAR_WITH_CLAUDE:-0}
-    image: interlinear:latest
     container_name: interlinear
     restart: unless-stopped
     ports:
       # Só a sua máquina acessa. Para expor na rede local, troque por
       # "8000:8000" e liste o IP ou nome da máquina em INTERLINEAR_ALLOWED_HOSTS.
       - "127.0.0.1:${INTERLINEAR_PORT:-8000}:8000"
-    environment:
+    environment: &environment
       INTERLINEAR_LOG_LEVEL: ${INTERLINEAR_LOG_LEVEL:-INFO}
       INTERLINEAR_ALLOWED_HOSTS: ${INTERLINEAR_ALLOWED_HOSTS:-}
-      # Ollama e LM Studio rodando no host, fora do container.
-      INTERLINEAR_OLLAMA_URL: http://host.docker.internal:11434/v1
-      INTERLINEAR_LMSTUDIO_URL: http://host.docker.internal:1234/v1
+      INTERLINEAR_OCR_LANGS: ${INTERLINEAR_OCR_LANGS:-por+eng}
+      # Ollama e LM Studio rodando no computador, fora do container.
+      INTERLINEAR_OLLAMA_URL: ${INTERLINEAR_OLLAMA_URL:-http://host.docker.internal:11434/v1}
+      INTERLINEAR_LMSTUDIO_URL: ${INTERLINEAR_LMSTUDIO_URL:-http://host.docker.internal:1234/v1}
       # Chaves opcionais: definidas aqui, não precisam ser gravadas em disco.
       INTERLINEAR_OPENAI_KEY: ${INTERLINEAR_OPENAI_KEY:-}
       INTERLINEAR_ANTHROPIC_KEY: ${INTERLINEAR_ANTHROPIC_KEY:-}
@@ -31,9 +36,42 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - interlinear-data:/data
-      # Login do Claude Code (só com INTERLINEAR_WITH_CLAUDE=1).
+      # Login do Claude Code (só na imagem com o Claude Code).
       - interlinear-claude:/claude
+
+  # Desenvolvimento (CONTRIBUTING.md). Só sobe quando pedido pelo nome:
+  #   docker compose run --rm dev pytest     testes
+  #   docker compose up dev                  app com recarga automática, porta 8001
+  # O código é montado só para leitura: nada do que roda aqui escreve no projeto.
+  dev:
+    profiles: ["dev"]
+    image: interlinear:dev
+    build:
+      context: .
+      target: dev
+    working_dir: /app
+    command:
+      - python
+      - -m
+      - uvicorn
+      - app.main:app
+      - --app-dir=backend
+      - --host=0.0.0.0
+      - --port=8000
+      - --reload
+      - --reload-dir=backend
+    ports:
+      - "127.0.0.1:${INTERLINEAR_DEV_PORT:-8001}:8000"
+    environment:
+      <<: *environment
+      INTERLINEAR_LOG_LEVEL: ${INTERLINEAR_LOG_LEVEL:-DEBUG}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./:/app:ro
+      - interlinear-dev-data:/data
 
 volumes:
   interlinear-data:
   interlinear-claude:
+  interlinear-dev-data:

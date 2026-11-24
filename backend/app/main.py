@@ -1,17 +1,14 @@
 """Ponto de entrada da aplicação.
 
 O servidor serve a API e os arquivos da interface no mesmo endereço, o que
-evita CORS e faz o app abrir com um comando só.
-
-Por padrão escuta apenas em 127.0.0.1: as chaves de API ficam nesta máquina e
-nada deve responder na rede local sem o usuário pedir.
+evita CORS. Roda só dentro do container (Dockerfile); quem limita o acesso à
+máquina local é o compose, que publica a porta em 127.0.0.1.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -123,19 +120,3 @@ if FRONTEND_DIR.exists():
 else:
     log.warning("Interface não encontrada em %s; servindo só a API", FRONTEND_DIR)
 
-
-def run() -> None:
-    """Sobe o servidor e abre o navegador. Chamado por `python -m app.main` em backend/."""
-    import uvicorn
-
-    host = os.environ.get("INTERLINEAR_HOST", "127.0.0.1")
-    port = int(os.environ.get("INTERLINEAR_PORT", "8000"))
-
-    if os.environ.get("INTERLINEAR_OPEN_BROWSER", "1") == "1":
-        webbrowser.open(f"http://{host}:{port}")
-
-    uvicorn.run(app, host=host, port=port, log_level="info")
-
-
-if __name__ == "__main__":
-    run()
