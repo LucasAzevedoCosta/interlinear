@@ -17,6 +17,15 @@ troque uma biblioteca por outra sem perceber o efeito.
 | `python-multipart` | Apache-2.0 | Upload de arquivos     |
 | `pypdfium2`      | Apache-2.0 / BSD-3 | Renderiza páginas para o OCR |
 
+Na interface, o encaixe de painéis da bancada usa o **dockview-core** 8.8.3
+(MIT), copiado para `frontend/vendor/dockview-core-8.8.3/` com a licença ao
+lado. Vai junto do código, e não por CDN, para o app funcionar sem internet.
+Para atualizar, troque a pasta inteira e o `<script>` em `index.html`.
+
+As cores escuras da interface seguem a escala de cinzas do tema escuro do
+**Spectrum**, o sistema de design aberto da Adobe (Apache-2.0). Só os valores
+de cor foram aproveitados; nenhum arquivo do Spectrum vai no projeto.
+
 O OCR usa o **Tesseract** (Apache-2.0), chamado como programa externo e
 instalado na imagem Docker.
 

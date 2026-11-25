@@ -628,7 +628,9 @@ async function openProject(projectId) {
     state.review = { suggestions: [] };
 
     $('start').hidden = true;
-    for (const id of ['rail', 'editor', 'preview']) $(id).hidden = false;
+    // Os painéis ficam no dock (layout.js); o conteúdo é desenhado abaixo,
+    // esteja o painel aberto ou estacionado.
+    Layout.open();
     for (const id of ['homeBtn', 'exportBtn', 'bookBar']) $(id).hidden = false;
 
     $('bookTitle').value = data.document.title;
@@ -656,7 +658,7 @@ function goHome() {
   $('reviewRun').hidden = true;
   $('reviewBtn').hidden = true;
   $('start').hidden = false;
-  for (const id of ['rail', 'editor', 'preview']) $(id).hidden = true;
+  Layout.close();
   for (const id of ['homeBtn', 'translateBtn', 'exportBtn', 'bookBar', 'progress']) $(id).hidden = true;
   loadProjects();
 }

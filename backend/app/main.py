@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import data_root
-from .routes import ai, imports, projects, review
+from .routes import ai, imports, projects, review, workspace
 
 logging.basicConfig(
     level=os.environ.get("INTERLINEAR_LOG_LEVEL", "INFO"),
@@ -50,6 +50,7 @@ app.include_router(projects.router)
 app.include_router(imports.router)
 app.include_router(ai.router)
 app.include_router(review.router)
+app.include_router(workspace.router)
 
 
 # Escutar só em 127.0.0.1 não basta: um site aberto no navegador alcança a API

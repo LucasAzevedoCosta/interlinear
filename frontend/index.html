@@ -13,6 +13,16 @@
   <header class="bar">
     <span class="bar__mark">Interlinear</span>
 
+    <!-- Janela: painéis e áreas de trabalho (frontend/layout.js) -->
+    <span class="menu-anchor" id="windowAnchor" hidden>
+      <button class="btn btn--quiet" id="windowBtn" aria-haspopup="menu" aria-expanded="false">Janela ▾</button>
+      <span class="menu menu--left" id="windowMenu" role="menu" hidden></span>
+    </span>
+    <label class="workspace-pick" id="workspacePickLabel" hidden>
+      <span class="visually-hidden">Área de trabalho</span>
+      <select id="workspacePick" title="Área de trabalho: a disposição dos painéis"></select>
+    </label>
+
     <div class="bar__book" id="bookBar" hidden>
       <input class="bar__title" id="bookTitle" aria-label="Título do livro"/>
       <span class="toggle stages" role="group" aria-label="Etapa">
@@ -70,7 +80,7 @@
     </div>
   </header>
 
-  <main class="workbench" id="workbench" data-preview="shown">
+  <main class="workbench" id="workbench">
 
     <!-- Tela inicial: importar ou retomar -->
     <section class="start" id="start">
@@ -117,8 +127,13 @@
       </div>
     </section>
 
-    <!-- Bancada -->
-    <nav class="rail" id="rail" hidden aria-label="Capítulos">
+    <!-- Bancada: os painéis encaixáveis (frontend/layout.js). -->
+    <div class="dock" id="dock" hidden></div>
+
+    <!-- Estacionamento: onde ficam os painéis fechados. Continuam no
+         documento para o app.js achá-los pelo id. -->
+    <div id="dockParking" hidden>
+    <nav class="rail" id="rail" aria-label="Capítulos">
       <div class="rail__head">
         <span>Capítulos</span>
         <span id="chapterCount"></span>
@@ -126,11 +141,11 @@
       <div class="rail__list" id="chapterList"></div>
     </nav>
 
-    <section class="editor" id="editor" hidden>
+    <section class="editor" id="editor">
       <div class="editor__inner" id="editorInner"></div>
     </section>
 
-    <aside class="preview" id="preview" hidden>
+    <aside class="preview" id="preview">
       <div class="preview__head">
         <span class="toggle" id="previewToggle">
           <button id="viewTranslated" aria-pressed="true">Tradução</button>
@@ -144,6 +159,7 @@
         <iframe class="preview__frame" id="previewFrame" title="Prévia do capítulo"></iframe>
       </div>
     </aside>
+    </div>
 
   </main>
 </div>
@@ -492,6 +508,8 @@
 
 <div class="toast" id="toast" hidden></div>
 
+<script src="/vendor/dockview-core-8.8.3/dockview-core.min.js"></script>
+<script src="/layout.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

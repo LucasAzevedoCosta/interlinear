@@ -4,29 +4,36 @@
    branca e tem todo o contraste. Quem passa seis horas revisando precisa que
    o olho descanse na coluna de texto, não na interface.
 
+   Os cinzas da bancada seguem a escala do tema escuro do Spectrum, o sistema
+   de design da Adobe: neutros, sem puxar para o azul, como no InDesign e no
+   Photoshop. A referência de editor profissional é deles.
+
    Literata é a face de leitura: foi desenhada para e-readers, que é
    exatamente onde este texto vai acabar. */
 
 @import url('https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&display=swap');
 
 :root {
-  --bench:        #30343c;
-  --bench-deep:   #24272d;
-  --bench-raised: #3a3f49;
-  --rule:         #434954;
-  --rule-soft:    #3a3f49;
+  /* Escala de cinza do tema escuro (do mais fundo ao mais alto). */
+  --bench-deep:   #1d1d1d;   /* barra e fundo do app */
+  --bench:        #262626;   /* painéis */
+  --bench-raised: #323232;   /* item ativo, botão */
+  --bench-hover:  #3a3a3a;
+  --rule:         #3f3f3f;
+  --rule-strong:  #545454;
+  --rule-soft:    #323232;
 
   --page:         #ffffff;
   --paper:        #f8f7f5;
   --ink:          #191b1f;
   --ink-soft:     #52575f;
 
-  --on-bench:     #d9dce1;
-  --on-bench-dim: #878d98;
+  --on-bench:     #ebebeb;
+  --on-bench-dim: #b2b2b2;
 
   /* Lápis azul de revisor: as ações e o que já foi revisado. */
-  --pencil:       #4a7fbd;
-  --pencil-deep:  #39659a;
+  --pencil:       #378ef0;   /* contornos e indicadores sobre o escuro */
+  --pencil-deep:  #1473e6;   /* fundo de botão com texto branco (4,6:1) */
   /* Âmbar: o que ainda falta. Nunca usado para erro. */
   --pending:      #b08a33;
   --alert:        #c0604c;
@@ -52,8 +59,8 @@ html, body {
 
 body {
   font-family: var(--ui);
-  font-size: 14px;
-  background: var(--bench);
+  font-size: 13px;
+  background: var(--bench-deep);
   color: var(--on-bench);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
@@ -76,28 +83,89 @@ button {
 
 .app {
   display: grid;
-  grid-template-rows: 48px 1fr;
+  grid-template-rows: 40px 1fr;
   height: 100%;
 }
 
+/* A tela inicial ou o dock: um dos dois ocupa tudo. */
 .workbench {
-  display: grid;
-  grid-template-columns: var(--rail-width) minmax(320px, 1fr) minmax(300px, 0.85fr);
+  display: flex;
   min-height: 0;
+  min-width: 0;
 }
 
-.workbench[data-preview="hidden"] {
-  grid-template-columns: var(--rail-width) 1fr;
+.workbench > .start,
+.workbench > .dock { flex: 1; min-width: 0; }
+
+/* ------------------------------------------------------------------ dock
+
+   Os painéis encaixáveis (frontend/layout.js, dockview-core). O tema escuro
+   da biblioteca dá a estrutura; aqui só as cores e a densidade, para casar
+   com a bancada. */
+
+.dock .dockview-theme-dark,
+.dock.dockview-theme-dark {
+  --dv-group-view-background-color: var(--bench);
+  --dv-tabs-and-actions-container-background-color: var(--bench-deep);
+  --dv-tabs-and-actions-container-height: 30px;
+  --dv-tabs-and-actions-container-font-size: 12px;
+  --dv-activegroup-visiblepanel-tab-background-color: var(--bench);
+  --dv-activegroup-visiblepanel-tab-color: var(--on-bench);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--bench-deep);
+  --dv-activegroup-hiddenpanel-tab-color: var(--on-bench-dim);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--bench);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--on-bench-dim);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--bench-deep);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--on-bench-dim);
+  --dv-tab-divider-color: var(--rule);
+  --dv-separator-border: var(--rule);
+  --dv-paneview-header-border-color: var(--rule);
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: var(--pencil);
+  --dv-drag-over-background-color: rgba(55, 142, 240, 0.18);
+  --dv-drag-over-border-color: var(--pencil);
+  --dv-icon-hover-background-color: var(--bench-hover);
+  --dv-floating-border: 1px solid var(--rule-strong);
+  --dv-floating-titlebar-background-color: var(--bench-raised);
 }
 
-.workbench[data-preview="hidden"] .preview { display: none; }
+/* A aba do grupo em foco ganha o traço azul, como nos apps da Adobe. */
+.dock .dv-groupview.dv-active-group .dv-tabs-and-actions-container .dv-tab.dv-active-tab {
+  box-shadow: inset 0 -2px 0 var(--pencil);
+}
+
+/* O elemento de cada painel ocupa o painel inteiro e rola por dentro. */
+.dock-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dock-panel > .rail,
+.dock-panel > .editor,
+.dock-panel > .preview {
+  flex: 1;
+  min-height: 0;
+  border: 0;
+}
+
+/* Visível só para leitores de tela. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 
 /* ------------------------------------------------------------------- bar */
 
 .bar {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   padding: 0 14px;
   background: var(--bench-deep);
   border-bottom: 1px solid var(--rule);
@@ -143,6 +211,19 @@ button {
 
 .bar__actions { display: flex; gap: 6px; align-items: center; }
 
+/* Seletor de área de trabalho, ao lado do menu Janela. */
+.workspace-pick select {
+  height: 26px;
+  max-width: 180px;
+  padding: 0 6px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--bench);
+  color: var(--on-bench);
+  font-size: 12px;
+}
+.workspace-pick select:hover { border-color: var(--rule-strong); }
+
 .stages { flex: 0 0 auto; }
 .stages button { padding: 4px 12px; }
 
@@ -170,6 +251,9 @@ button {
   border-radius: var(--radius);
 }
 
+.menu--left { left: 0; right: auto; }
+.menu__sep { border: 0; border-top: 1px solid var(--rule); margin: 4px 2px; }
+
 .menu button:hover:not(:disabled), .menu button:focus-visible { background: var(--bench-raised); }
 .menu button:disabled { opacity: 0.45; cursor: not-allowed; }
 .menu b { display: block; font-weight: 600; }
@@ -187,7 +271,7 @@ button {
   transition: background 120ms ease, border-color 120ms ease;
 }
 
-.btn:hover:not(:disabled) { background: #454b56; border-color: #525968; }
+.btn:hover:not(:disabled) { background: var(--bench-hover); border-color: var(--rule-strong); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .btn--primary {
@@ -769,7 +853,7 @@ button {
 
 .drop[data-over="true"] {
   border-color: var(--pencil);
-  background: rgba(74, 127, 189, 0.08);
+  background: rgba(55, 142, 240, 0.08);
 }
 
 .drop__hint { color: var(--on-bench-dim); font-size: 13px; margin: 10px 0 0; }
@@ -1102,7 +1186,7 @@ button {
 }
 .connect[data-state="ok"] .connect__dot {
   background: var(--pencil);
-  box-shadow: 0 0 0 3px rgba(74, 127, 189, 0.18);
+  box-shadow: 0 0 0 3px rgba(55, 142, 240, 0.18);
 }
 /* O aviso de que o login é feito pelo container. */
 .connect__notice {
@@ -1356,7 +1440,3 @@ button {
   line-height: 1.6;
 }
 
-@media (max-width: 1000px) {
-  .workbench { grid-template-columns: 180px 1fr; }
-  .preview { display: none; }
-}
