@@ -632,6 +632,7 @@ async function openProject(projectId) {
     // esteja o painel aberto ou estacionado.
     Original.reset();
     Layout.open();
+    Typography.reset();
     for (const id of ['homeBtn', 'exportBtn', 'bookBar']) $(id).hidden = false;
 
     $('bookTitle').value = data.document.title;
@@ -661,6 +662,7 @@ function goHome() {
   $('start').hidden = false;
   Layout.close();
   Original.reset();
+  Typography.reset();
   for (const id of ['homeBtn', 'translateBtn', 'exportBtn', 'bookBar', 'progress']) $(id).hidden = true;
   loadProjects();
 }
@@ -862,8 +864,10 @@ function renderEditor() {
   chapter.blocks.forEach((block, index) => {
     inner.append(renderBlock(block, chapter.blocks[index + 1]));
   });
-  // Blocos juntados ou trocados mudam as caixas da página no painel Original.
+  // Blocos juntados ou trocados mudam as caixas da página no painel Original
+  // e podem tirar o bloco selecionado dos painéis de tipografia.
   Original.refresh();
+  Typography.refresh();
 }
 
 const TEXT_KINDS = new Set(Object.keys(KIND_LABELS));

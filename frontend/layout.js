@@ -33,6 +33,11 @@ const Layout = (() => {
     // A página do PDF (original.js). Opcional: nas áreas prontas entra como
     // aba atrás do Texto, e só aparece quando o usuário clica nela.
     original: { title: 'Original · PDF', node: 'original' },
+    // Tipografia (typography.js): o bloco selecionado e os estilos do livro.
+    props: { title: 'Propriedades', node: 'propsPanel' },
+    paragraph: { title: 'Parágrafo', node: 'paraPanel' },
+    character: { title: 'Caractere', node: 'charPanel' },
+    styles: { title: 'Estilos de parágrafo', node: 'stylesPanel' },
   };
 
   // Onde um painel reaberto pelo menu Janela entra, se não houver referência.
@@ -42,6 +47,11 @@ const Layout = (() => {
     preview: { direction: 'right' },
     // Pelo menu Janela, abre junto do Texto (e já à frente, por ser nova).
     original: { referencePanel: 'editor', direction: 'within' },
+    // Os de tipografia se juntam num grupo à direita, como no InDesign.
+    props: { direction: 'right' },
+    paragraph: { referencePanel: 'props', direction: 'within' },
+    character: { referencePanel: 'props', direction: 'within' },
+    styles: { referencePanel: 'props', direction: 'below' },
   };
 
   function addChapters(api) {
@@ -86,6 +96,29 @@ const Layout = (() => {
         api.addPanel({ id: 'preview', component: 'preview', title: PANELS.preview.title,
           position: { referencePanel: 'editor', direction: 'within' }, inactive: true });
         sizeGroup(api, 'chapters', 200);
+      },
+    },
+    tipografia: {
+      name: 'Tipografia',
+      build(api) {
+        addChapters(api);
+        api.addPanel({ id: 'editor', component: 'editor', title: PANELS.editor.title,
+          position: { referencePanel: 'chapters', direction: 'right' } });
+        addOriginalTab(api);
+        api.addPanel({ id: 'preview', component: 'preview', title: PANELS.preview.title,
+          position: { referencePanel: 'editor', direction: 'right' } });
+        // Coluna da direita: o bloco selecionado em cima, os estilos embaixo.
+        api.addPanel({ id: 'props', component: 'props', title: PANELS.props.title,
+          position: { referencePanel: 'preview', direction: 'right' } });
+        api.addPanel({ id: 'paragraph', component: 'paragraph', title: PANELS.paragraph.title,
+          position: { referencePanel: 'props', direction: 'within' }, inactive: true });
+        api.addPanel({ id: 'character', component: 'character', title: PANELS.character.title,
+          position: { referencePanel: 'props', direction: 'within' }, inactive: true });
+        api.addPanel({ id: 'styles', component: 'styles', title: PANELS.styles.title,
+          position: { referencePanel: 'props', direction: 'below' } });
+        sizeGroup(api, 'chapters', 190);
+        sizeGroup(api, 'props', 290);
+        sizeGroup(api, 'preview', Math.round((api.width - 480) * 0.42));
       },
     },
     lado: {
@@ -169,12 +202,22 @@ const Layout = (() => {
 
   /* ------------------------------------------------------------ o dock */
 
+  // O elemento de cada painel, guardado na primeira vez. Não dá para procurar
+  // de novo pelo id: ao montar outra área, o dockview tira os painéis antigos
+  // do documento antes de criar os novos, e o elemento sai junto, dentro do
+  // painel velho. getElementById só acha o que está no documento.
+  const nodes = {};
+
+  function nodeOf(panelId) {
+    if (!nodes[panelId]) nodes[panelId] = document.getElementById(PANELS[panelId].node);
+    return nodes[panelId];
+  }
+
   function createComponent({ name }) {
-    const spec = PANELS[name];
-    if (!spec) throw new Error(`Painel desconhecido: ${name}`);
+    if (!PANELS[name]) throw new Error(`Painel desconhecido: ${name}`);
     const element = document.createElement('div');
     element.className = 'dock-panel';
-    element.append(document.getElementById(spec.node));
+    element.append(nodeOf(name));
     return { element, init() {} };
   }
 
@@ -187,11 +230,13 @@ const Layout = (() => {
     // estaciona se o painel não voltou.
     queueMicrotask(() => {
       if (api && api.getPanel(panelId)) return;
-      document.getElementById('dockParking').append(document.getElementById(spec.node));
+      document.getElementById('dockParking').append(nodeOf(panelId));
     });
   }
 
   function create() {
+    // Todos os elementos ainda estão no estacionamento: guarda agora.
+    for (const panelId of Object.keys(PANELS)) nodeOf(panelId);
     const element = document.getElementById('dock');
     api = dockview.createDockview(element, {
       theme: dockview.themeDark,
@@ -307,7 +352,7 @@ const Layout = (() => {
     }
     let position = REOPEN[panelId];
     if (position.referencePanel && !api.getPanel(position.referencePanel)) {
-      position = { direction: 'left' };
+      position = { direction: panelId === 'editor' ? 'left' : 'right' };
     }
     if (!api.panels.length) position = undefined;
     api.addPanel({ id: panelId, component: panelId, title: PANELS[panelId].title,

@@ -145,7 +145,8 @@ button {
 .dock-panel > .rail,
 .dock-panel > .editor,
 .dock-panel > .preview,
-.dock-panel > .original {
+.dock-panel > .original,
+.dock-panel > .tpanel {
   flex: 1;
   min-height: 0;
   border: 0;
@@ -590,6 +591,9 @@ button {
   to   { background: transparent; }
 }
 .block--flash { animation: block-flash 1.6s ease-out; }
+
+/* O bloco em que os painéis de tipografia estão trabalhando. */
+.block--selected { box-shadow: inset 2px 0 0 var(--pencil-deep); background: #fff; }
 @media (prefers-reduced-motion: reduce) {
   .block--flash { animation: none; outline: 1px solid var(--pending); }
 }
@@ -798,6 +802,164 @@ button {
   border-radius: 2px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.35), 0 12px 32px rgba(0,0,0,0.22);
 }
+
+/* ------------------------------------------------------------ tipografia
+
+   Os painéis Propriedades, Parágrafo, Caractere e Estilos de parágrafo
+   (typography.js). Densos como os do InDesign: rótulo pequeno em cima,
+   campo estreito embaixo, duas colunas. */
+
+.tpanel {
+  background: var(--bench);
+  overflow-y: auto;
+  padding: 10px 12px 16px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tpanel__empty,
+.tpanel__hint {
+  margin: 0;
+  color: var(--on-bench-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.tpanel__empty { padding: 12px 0; font-size: 12px; }
+
+.tpanel__meta { margin: 0; color: var(--on-bench-dim); }
+.tpanel__meta b, .tpanel__style-name b { color: var(--on-bench); font-weight: 600; }
+.tpanel__style-name { margin: 0; color: var(--on-bench-dim); }
+
+.tpanel__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+}
+
+.tpanel__label {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--on-bench);
+}
+
+.tpanel__list { margin: 0; padding-left: 16px; color: var(--on-bench); line-height: 1.6; }
+.tpanel .btn { align-self: flex-start; padding: 3px 10px; font-size: 12px; }
+
+.tgrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.tfield { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tfield--wide { grid-column: 1 / -1; }
+.tfield--bool { flex-direction: row; align-items: center; gap: 6px; grid-column: 1 / -1; }
+
+.tfield__label { font-size: 11px; color: var(--on-bench-dim); }
+.tfield--bool .tfield__label { font-size: 12px; color: var(--on-bench); cursor: pointer; }
+.tfield__dot { color: var(--pencil); margin-right: 4px; font-size: 9px; vertical-align: 1px; }
+
+.tfield__row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+
+.tfield select,
+.tfield__number {
+  height: 24px;
+  min-width: 0;
+  padding: 0 6px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bench-deep);
+  font-size: 12px;
+}
+
+.tfield select { flex: 1; }
+.tfield__number { width: 100%; max-width: 72px; font-variant-numeric: tabular-nums; }
+.tfield__number:focus, .tfield select:focus { border-color: var(--pencil); outline: none; }
+.tfield__unit { color: var(--on-bench-dim); font-size: 11px; }
+
+.tfield__reset {
+  padding: 0 4px;
+  color: var(--on-bench-dim);
+  font-size: 13px;
+  border-radius: var(--radius);
+}
+.tfield__reset:hover { color: var(--on-bench); background: var(--bench-raised); }
+
+/* Botões de alinhamento: um grupo, como na barra do InDesign. */
+.tseg { display: inline-flex; gap: 2px; }
+.tseg button {
+  width: 32px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bench-deep);
+  color: var(--on-bench-dim);
+}
+.tseg button:hover { color: var(--on-bench); }
+.tseg button[aria-pressed="true"] { background: var(--pencil-deep); border-color: var(--pencil-deep); color: #fff; }
+
+.ttools { display: flex; gap: 4px; flex-wrap: wrap; }
+.ttool {
+  min-width: 30px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bench-deep);
+  color: var(--on-bench);
+}
+.ttool:hover { background: var(--bench-raised); }
+
+.tstyles { display: flex; flex-direction: column; gap: 1px; }
+.tstyle { display: flex; align-items: stretch; border-radius: var(--radius); }
+.tstyle[data-current="true"] { background: #37404d; }
+.tstyle:hover { background: var(--bench-raised); }
+.tstyle[data-current="true"]:hover { background: #3e4857; }
+
+.tstyle__apply {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  text-align: left;
+  color: var(--on-bench);
+}
+.tstyle__apply:disabled { cursor: default; }
+.tstyle__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tstyle__flag { color: var(--pencil); font-size: 9px; }
+.tstyle__tag {
+  margin-left: auto;
+  padding: 0 5px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  font-size: 10px;
+  color: var(--on-bench-dim);
+}
+.tstyle__edit { padding: 0 10px; color: var(--on-bench-dim); }
+.tstyle__edit:hover, .tstyle__edit[aria-expanded="true"] { color: var(--on-bench); }
+
+.tstyle__editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 2px 0 8px;
+  padding: 10px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--bench-deep);
+}
+.tstyle__actions { display: flex; flex-wrap: wrap; gap: 6px; }
 
 /* -------------------------------------------------------------- original
 
