@@ -630,6 +630,7 @@ async function openProject(projectId) {
     $('start').hidden = true;
     // Os painéis ficam no dock (layout.js); o conteúdo é desenhado abaixo,
     // esteja o painel aberto ou estacionado.
+    Original.reset();
     Layout.open();
     for (const id of ['homeBtn', 'exportBtn', 'bookBar']) $(id).hidden = false;
 
@@ -659,6 +660,7 @@ function goHome() {
   $('reviewBtn').hidden = true;
   $('start').hidden = false;
   Layout.close();
+  Original.reset();
   for (const id of ['homeBtn', 'translateBtn', 'exportBtn', 'bookBar', 'progress']) $(id).hidden = true;
   loadProjects();
 }
@@ -860,6 +862,8 @@ function renderEditor() {
   chapter.blocks.forEach((block, index) => {
     inner.append(renderBlock(block, chapter.blocks[index + 1]));
   });
+  // Blocos juntados ou trocados mudam as caixas da página no painel Original.
+  Original.refresh();
 }
 
 const TEXT_KINDS = new Set(Object.keys(KIND_LABELS));

@@ -159,6 +159,33 @@
         <iframe class="preview__frame" id="previewFrame" title="Prévia do capítulo"></iframe>
       </div>
     </aside>
+
+    <!-- A página do PDF original, com o bloco selecionado destacado
+         (frontend/original.js). Começa como aba atrás do Texto. -->
+    <section class="original" id="original" aria-label="Original do PDF">
+      <div class="original__head">
+        <button class="btn btn--quiet original__nav" id="origPrev" aria-label="Página anterior">‹</button>
+        <span class="original__page-label" id="origPageLabel" aria-live="polite"></span>
+        <button class="btn btn--quiet original__nav" id="origNext" aria-label="Próxima página">›</button>
+        <select id="origZoom" aria-label="Zoom da página">
+          <option value="fit">Ajustar à largura</option>
+          <option value="1">100%</option>
+          <option value="1.5">150%</option>
+          <option value="2">200%</option>
+        </select>
+        <span style="flex:1"></span>
+        <label class="original__follow" title="Abrir a página do bloco que você seleciona no texto">
+          <input type="checkbox" id="origFollow" checked/> Seguir seleção
+        </label>
+      </div>
+      <div class="original__scroll" id="origScroll">
+        <div class="original__sheet" id="origSheet" hidden>
+          <img class="original__img" id="origImg" alt=""/>
+          <div class="original__boxes" id="origBoxes"></div>
+        </div>
+        <p class="original__empty" id="origEmpty" hidden></p>
+      </div>
+    </section>
     </div>
 
   </main>
@@ -511,5 +538,6 @@
 <script src="/vendor/dockview-core-8.8.3/dockview-core.min.js"></script>
 <script src="/layout.js"></script>
 <script src="/app.js"></script>
+<script src="/original.js"></script>
 </body>
 </html>

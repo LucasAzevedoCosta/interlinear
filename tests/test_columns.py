@@ -112,6 +112,16 @@ def test_paragrafo_continua_da_coluna_esquerda_para_a_direita(blocks):
     assert ponte.text.index("PONTE início linha 2") < ponte.text.index("PONTE fim linha 0")
 
 
+def test_paragrafo_entre_colunas_tem_um_retangulo_em_cada(blocks):
+    """Mesmo parágrafo, mesma página: um retângulo por coluna, esquerda primeiro."""
+    ponte = next(b for b in blocks if b.text.startswith("PONTE início"))
+    boxes = ponte.meta["boxes"]
+    assert len(boxes) == 2
+    assert boxes[0][0] == boxes[1][0]
+    esquerda, direita = boxes
+    assert esquerda[3] <= direita[1]  # x1 da esquerda antes do x0 da direita
+
+
 def test_titulo_largo_divide_a_pagina_em_faixas(blocks):
     page_two = [b for b in blocks if b.page == 2]
     assert _tags(page_two) == [

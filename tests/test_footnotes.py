@@ -134,6 +134,15 @@ def test_paragrafo_atravessa_a_pagina_por_cima_das_notas(blocks):
     assert order[:4] == ["heading1", "paragraph", "paragraph", "footnote"]
 
 
+def test_paragrafo_que_atravessa_a_pagina_tem_um_retangulo_em_cada(blocks):
+    """O painel Original destaca as duas partes, uma em cada página."""
+    paragrafo = next(b for b in blocks if b.text.startswith("A menina voltou no dia seguinte"))
+    assert [box[0] for box in paragrafo.meta["boxes"]] == [1, 2]
+    # A nota tem a própria posição, separada da do parágrafo.
+    nota = next(b for b in blocks if b.kind == "footnote")
+    assert nota.meta["boxes"][0][0] == nota.page
+
+
 def test_texto_pequeno_sem_marcador_nao_vira_nota(blocks):
     caption = next(b for b in blocks if "Desenho de Teodoro" in b.text)
     assert caption.kind == "paragraph"

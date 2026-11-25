@@ -144,7 +144,8 @@ button {
 
 .dock-panel > .rail,
 .dock-panel > .editor,
-.dock-panel > .preview {
+.dock-panel > .preview,
+.dock-panel > .original {
   flex: 1;
   min-height: 0;
   border: 0;
@@ -796,6 +797,103 @@ button {
   background: var(--page);
   border-radius: 2px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.35), 0 12px 32px rgba(0,0,0,0.22);
+}
+
+/* -------------------------------------------------------------- original
+
+   A página do PDF de onde o texto veio (original.js). As caixas por cima da
+   imagem são posicionadas em % da página: o zoom só muda a largura da folha. */
+
+.original {
+  background: var(--bench-deep);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.original__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 12px;
+  color: var(--on-bench-dim);
+}
+
+.original__nav { padding: 2px 8px; font-size: 15px; line-height: 1; }
+
+.original__page-label {
+  min-width: 72px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.original__head select {
+  height: 24px;
+  padding: 0 4px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--bench);
+  font-size: 12px;
+}
+
+.original__follow { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+
+.original__scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 20px;
+}
+
+.original__sheet {
+  position: relative;
+  margin: 0 auto;
+  background: var(--page);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.35), 0 12px 32px rgba(0,0,0,0.22);
+}
+
+.original__img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.original__boxes { position: absolute; inset: 0; }
+
+/* Caixa de cada bloco: invisível em repouso, contorno ao passar o mouse
+   (dá para clicar e ir ao bloco), azul cheio no bloco selecionado. */
+.original__box {
+  position: absolute;
+  padding: 0;
+  margin: -2px;
+  border: 1.5px solid transparent;
+  border-radius: 2px;
+  background: none;
+  box-sizing: content-box;
+}
+
+.original__sheet:hover .original__box { border-color: rgba(55, 142, 240, 0.28); }
+.original__box:hover,
+.original__sheet:hover .original__box:hover {
+  border-color: var(--pencil);
+  background: rgba(55, 142, 240, 0.08);
+}
+
+.original__box--selected,
+.original__sheet:hover .original__box--selected {
+  border-color: var(--pencil-deep);
+  background: rgba(20, 115, 230, 0.12);
+}
+
+.original__box:focus-visible { outline: 2px solid var(--pencil); outline-offset: 1px; }
+
+.original__empty {
+  max-width: 34ch;
+  margin: 48px auto;
+  text-align: center;
+  line-height: 1.55;
+  color: var(--on-bench-dim);
 }
 
 .toggle {

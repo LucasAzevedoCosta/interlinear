@@ -1,6 +1,6 @@
 /* Interlinear — painéis encaixáveis da bancada.
 
-   Os painéis (Capítulos, Texto, Prévia) são os mesmos elementos de sempre,
+   Os painéis (Capítulos, Texto, Prévia, Original) são os mesmos elementos de sempre,
    com os mesmos ids: este arquivo só os muda de lugar. O app.js continua
    achando tudo por getElementById e não sabe que existe um dock.
 
@@ -30,6 +30,9 @@ const Layout = (() => {
     chapters: { title: 'Capítulos', node: 'rail' },
     editor: { title: 'Texto', node: 'editor' },
     preview: { title: 'Prévia EPUB', node: 'preview' },
+    // A página do PDF (original.js). Opcional: nas áreas prontas entra como
+    // aba atrás do Texto, e só aparece quando o usuário clica nela.
+    original: { title: 'Original · PDF', node: 'original' },
   };
 
   // Onde um painel reaberto pelo menu Janela entra, se não houver referência.
@@ -37,10 +40,19 @@ const Layout = (() => {
     chapters: { direction: 'left' },
     editor: { referencePanel: 'chapters', direction: 'right' },
     preview: { direction: 'right' },
+    // Pelo menu Janela, abre junto do Texto (e já à frente, por ser nova).
+    original: { referencePanel: 'editor', direction: 'within' },
   };
 
   function addChapters(api) {
     api.addPanel({ id: 'chapters', component: 'chapters', title: PANELS.chapters.title });
+  }
+
+  // O Original como aba atrás do Texto. Arrastar a aba para o lado deixa os
+  // dois visíveis ao mesmo tempo, e a área de trabalho guarda isso.
+  function addOriginalTab(api) {
+    api.addPanel({ id: 'original', component: 'original', title: PANELS.original.title,
+      position: { referencePanel: 'editor', direction: 'within' }, inactive: true });
   }
 
   function sizeGroup(api, panelId, width) {
@@ -56,6 +68,7 @@ const Layout = (() => {
         addChapters(api);
         api.addPanel({ id: 'editor', component: 'editor', title: PANELS.editor.title,
           position: { referencePanel: 'chapters', direction: 'right' } });
+        addOriginalTab(api);
         api.addPanel({ id: 'preview', component: 'preview', title: PANELS.preview.title,
           position: { referencePanel: 'editor', direction: 'right' } });
         sizeGroup(api, 'chapters', 232);
@@ -68,6 +81,7 @@ const Layout = (() => {
         addChapters(api);
         api.addPanel({ id: 'editor', component: 'editor', title: PANELS.editor.title,
           position: { referencePanel: 'chapters', direction: 'right' } });
+        addOriginalTab(api);
         // A prévia fica como aba atrás do texto: um clique e ela aparece.
         api.addPanel({ id: 'preview', component: 'preview', title: PANELS.preview.title,
           position: { referencePanel: 'editor', direction: 'within' }, inactive: true });
@@ -80,6 +94,7 @@ const Layout = (() => {
         addChapters(api);
         api.addPanel({ id: 'editor', component: 'editor', title: PANELS.editor.title,
           position: { referencePanel: 'chapters', direction: 'right' } });
+        addOriginalTab(api);
         api.addPanel({ id: 'preview', component: 'preview', title: PANELS.preview.title,
           position: { referencePanel: 'editor', direction: 'right' } });
         sizeGroup(api, 'chapters', 200);

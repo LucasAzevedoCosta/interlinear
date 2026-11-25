@@ -108,6 +108,11 @@ def merge_with_next(document: Document, block_id: str) -> tuple[Chapter, Block]:
     merged.meta.pop("stale", None)
     if translated and (first.meta.get("stale") or second.meta.get("stale")):
         merged.meta["stale"] = True
+    # Onde o bloco está no PDF: as duas metades, para o painel Original
+    # destacar o parágrafo inteiro (inclusive o que atravessa a página).
+    boxes = list(first.meta.get("boxes") or []) + list(second.meta.get("boxes") or [])
+    if boxes:
+        merged.meta["boxes"] = boxes
     # Id novo de propósito: uma tradução em andamento ainda tem a tradução
     # de cada metade pendente pelo id antigo e não deve gravá-la aqui.
     chapter.blocks[index : index + 2] = [merged]

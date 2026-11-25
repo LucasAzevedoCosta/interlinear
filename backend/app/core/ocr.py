@@ -212,7 +212,7 @@ def parse_hocr(content: bytes, *, page: int, page_height: float) -> list[Line]:
         box = _BBOX.search(title)
         if not text or not box:
             continue
-        x0, top, x1, _ = (int(value) for value in box.groups())
+        x0, top, x1, bottom = (int(value) for value in box.groups())
         size_match = _X_SIZE.search(title)
         size = float(size_match.group(1)) * scale if size_match else 0.0
         lines.append(
@@ -224,6 +224,7 @@ def parse_hocr(content: bytes, *, page: int, page_height: float) -> list[Line]:
                 x0=x0 * scale,
                 x1=x1 * scale,
                 top=top * scale,
+                bottom=bottom * scale,
                 page=page,
                 page_height=page_height,
                 chars=[(char, "") for char in text],

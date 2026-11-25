@@ -16,6 +16,7 @@ from ..core import editing
 from ..core.blocks import Block, Chapter, Document
 from ..core.epub_write import DEFAULT_CSS, chapter_to_xhtml, write_epub
 from ..core.importer import ImportOptions, import_file
+from ..core.page_image import page_sizes, render_page
 from ..core.review import find_suspects
 from ..core.storage import ProjectStore
 from ..deps import get_store
@@ -430,6 +431,62 @@ async def project_image(project_id: str, name: str) -> FileResponse:
     if not path.exists():
         raise HTTPException(404, "Imagem não encontrada")
     return FileResponse(path)
+
+
+# --------------------------------------------------------------------------
+# O arquivo original (painel Original · PDF da bancada)
+# --------------------------------------------------------------------------
+
+# Resoluções aceitas para a imagem da página. Poucas e fixas: cada uma vira um
+# arquivo no cache, e um valor livre deixaria qualquer cliente encher o disco.
+PAGE_DPI = (72, 110, 150, 200)
+
+
+@router.get("/{project_id}/source")
+async def project_source(project_id: str) -> dict[str, Any]:
+    """O tipo do arquivo original e, se for PDF, o tamanho de cada página.
+
+    `pages` vem em pontos, [largura, altura], na mesma medida de
+    meta["boxes"] dos blocos. Lista vazia quando o original é um EPUB ou o
+    PDF não está mais na pasta do projeto.
+    """
+    store = get_store()
+    meta = store.get_meta(project_id)
+    if meta is None:
+        raise HTTPException(404, "Projeto não encontrado")
+    pdf = store.source_pdf(project_id)
+    if pdf is None:
+        return {"kind": meta.source_kind, "pages": []}
+    sizes = await asyncio.to_thread(page_sizes, pdf)
+    return {"kind": "pdf", "pages": [list(size) for size in sizes]}
+
+
+@router.get("/{project_id}/source/pages/{page}")
+async def project_source_page(project_id: str, page: int, dpi: int = Query(110)) -> FileResponse:
+    """A página `page` do PDF original em PNG colorido, guardada em cache."""
+    if dpi not in PAGE_DPI:
+        raise HTTPException(400, f"Resolução inválida; use uma destas: {PAGE_DPI}")
+    store = get_store()
+    pdf = store.source_pdf(project_id)
+    if pdf is None:
+        raise HTTPException(404, "Este projeto não tem o PDF original")
+
+    cache = store.project_dir(project_id) / "cache" / "pages" / f"{page}-{dpi}.png"
+    if not cache.exists():
+        try:
+            png = await asyncio.to_thread(render_page, pdf, page, dpi=dpi, grayscale=False)
+        except ValueError as error:
+            raise HTTPException(404, str(error)) from None
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        # Grava ao lado e troca: dois pedidos da mesma página ao mesmo tempo
+        # não deixam um PNG pela metade.
+        temporary = cache.with_suffix(f".{id(png)}.tmp")
+        temporary.write_bytes(png)
+        temporary.replace(cache)
+    # O PDF original não muda: o navegador pode guardar a imagem.
+    return FileResponse(
+        cache, media_type="image/png", headers={"Cache-Control": "private, max-age=86400"}
+    )
 
 
 @router.get("/{project_id}/export")

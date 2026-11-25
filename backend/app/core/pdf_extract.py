@@ -151,6 +151,9 @@ class Line:
     flow: float = 0.0
     # Número da tabela na página, se a linha é célula de uma.
     table: int | None = None
+    # Base da linha, na mesma medida de `top`. Zero quando não se sabe
+    # (linhas montadas à mão nos testes): aí vale top + size.
+    bottom: float = 0.0
 
     @property
     def word_count(self) -> int:
@@ -171,6 +174,8 @@ class PageImage:
     flow: float = 0.0
     # Fração da página que a imagem cobre.
     share: float = 0.0
+    # Base da imagem, na mesma medida de `top`.
+    bottom: float = 0.0
 
 
 @dataclass
@@ -443,6 +448,7 @@ def _read_lines(
                             PageImage(
                                 page=page_number,
                                 top=page_height - float(image.y1),
+                                bottom=page_height - float(image.y0),
                                 extension=payload[0],
                                 data=payload[1],
                                 x0=float(image.x0),
@@ -491,6 +497,7 @@ def _read_lines(
                         x0=float(text_line.x0),
                         x1=float(text_line.x1),
                         top=page_height - float(text_line.y1),
+                        bottom=page_height - float(text_line.y0),
                         page=page_number,
                         page_height=page_height,
                         chars=chars,
@@ -816,6 +823,29 @@ def _split_footnotes(lines: list[Line], body_size: float) -> tuple[list[Line], l
     return [line for line in lines if id(line) not in in_notes], notes
 
 
+def _boxes(lines: list[Line]) -> list[list[float]]:
+    """Onde o bloco está no PDF: um retângulo por página e coluna.
+
+    Cada item é [página, x0, topo, x1, base], em pontos, medidos do canto de
+    cima à esquerda (como Line.top). O painel Original da bancada usa isso
+    para destacar o bloco selecionado na imagem da página. Um parágrafo que
+    atravessa a página ou a coluna tem dois retângulos.
+    """
+    regions: dict[tuple[int, int], list[float]] = {}
+    for line in lines:
+        bottom = line.bottom or line.top + line.size
+        key = (line.page, line.column)
+        box = regions.get(key)
+        if box is None:
+            regions[key] = [line.x0, line.top, line.x1, bottom]
+        else:
+            box[0] = min(box[0], line.x0)
+            box[1] = min(box[1], line.top)
+            box[2] = max(box[2], line.x1)
+            box[3] = max(box[3], bottom)
+    return [[page, *(round(v, 1) for v in box)] for (page, _), box in regions.items()]
+
+
 def _footnote_block(note: Footnote, vocabulary: Vocabulary) -> Block | None:
     chars: list[StyledChar] = []
     for line in note.lines:
@@ -831,7 +861,7 @@ def _footnote_block(note: Footnote, vocabulary: Vocabulary) -> Block | None:
         kind="footnote",
         text=text,
         page=note.page,
-        meta={"marker": note.marker, "size": note.lines[0].size},
+        meta={"marker": note.marker, "size": note.lines[0].size, "boxes": _boxes(note.lines)},
     )
 
 
@@ -1079,7 +1109,7 @@ def extract_blocks(
                     kind=kind,  # type: ignore[arg-type]
                     text=text,
                     page=group[0].page,
-                    meta={"size": group[0].size},
+                    meta={"size": group[0].size, "boxes": _boxes(group)},
                 ),
             )
         )
@@ -1214,7 +1244,7 @@ def _table_block(cells: list[Line]) -> Block:
         kind="table",
         text="\n".join(text_rows),
         page=cells[0].page,
-        meta={"size": cells[0].size, "header": header},
+        meta={"size": cells[0].size, "header": header, "boxes": _boxes(cells)},
     )
 
 
@@ -1242,7 +1272,9 @@ def _image_blocks(
             name = f"pdf-{len(names_by_hash) + 1:03d}.{image.extension}"
             names_by_hash[digest] = name
             images[name] = image.data
-        kept.append((image.page, image.flow, Block(kind="image", src=name, page=image.page)))
+        box = [image.page, *(round(v, 1) for v in (image.x0, image.top, image.x1, image.bottom))]
+        block = Block(kind="image", src=name, page=image.page, meta={"boxes": [box]})
+        kept.append((image.page, image.flow, block))
 
     if kept:
         log.info("Extraídas %d imagens do PDF", len(kept))
