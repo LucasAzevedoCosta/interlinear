@@ -113,6 +113,9 @@ class Document:
     source_language: str = "en"
     identifier: str = field(default_factory=lambda: f"urn:uuid:{uuid.uuid4()}")
     chapters: list[Chapter] = field(default_factory=list)
+    # Estilos de parágrafo que o livro mudou ou criou (core/styles.py). Vazio
+    # num livro que nunca mexeu em estilo: aí ele sai como sempre saiu.
+    styles: dict[str, Any] = field(default_factory=dict)
     # Imagens extraídas: nome do arquivo -> bytes. Não entra no JSON do projeto,
     # é gravado em disco separadamente.
     images: dict[str, bytes] = field(default_factory=dict, repr=False)
@@ -137,6 +140,7 @@ class Document:
             "source_language": self.source_language,
             "identifier": self.identifier,
             "chapters": [c.to_dict() for c in self.chapters],
+            "styles": self.styles,
         }
 
     @classmethod
@@ -148,6 +152,7 @@ class Document:
             source_language=data.get("source_language", "en"),
             identifier=data.get("identifier", f"urn:uuid:{uuid.uuid4()}"),
             chapters=[Chapter.from_dict(c) for c in data.get("chapters", [])],
+            styles=data.get("styles") if isinstance(data.get("styles"), dict) else {},
         )
         return doc
 

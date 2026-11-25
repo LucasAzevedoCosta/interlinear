@@ -13,8 +13,9 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 
 from ..ai.review_apply import open_suspects
 from ..core import editing
-from ..core.blocks import Block, Chapter, Document
-from ..core.epub_write import DEFAULT_CSS, chapter_to_xhtml, write_epub
+from ..core import styles as book_styles
+from ..core.blocks import Block, Chapter, Document, new_id
+from ..core.epub_write import book_css, chapter_to_xhtml, write_epub
 from ..core.importer import ImportOptions, import_file
 from ..core.page_image import page_sizes, render_page
 from ..core.review import find_suspects
@@ -198,7 +199,8 @@ async def update_blocks(project_id: str, payload: dict[str, Any] = Body(...)) ->
 
     Formato esperado:
         {"updates": [{"id": "...", "text": "...", "translated": "...",
-                      "kind": "paragraph"}]}
+                      "kind": "paragraph", "style": "quote",
+                      "overrides": {"space_after": 1.5}}]}
 
     Campos ausentes ficam como estão, o que permite salvar só o que mudou.
 
@@ -232,9 +234,17 @@ async def update_blocks(project_id: str, payload: dict[str, Any] = Body(...)) ->
                 block.meta.pop("refused", None)
             if "kind" in update and update["kind"]:
                 editing.set_kind(block, str(update["kind"]))
+            # Estilo e ajuste do bloco têm campo próprio e são validados
+            # (core/styles.py): viram CSS no EPUB.
+            if "style" in update:
+                book_styles.set_block_style(document, block, update["style"])
+            if "overrides" in update:
+                book_styles.set_block_overrides(block, update["overrides"])
             if isinstance(update.get("meta"), dict):
                 # Mesclado, não substituído: o editor manda só o que mudou.
-                block.meta = {**block.meta, **update["meta"]}
+                # Estilo e ajuste não entram por aqui, sem validação.
+                extra = {k: v for k, v in update["meta"].items() if k not in ("style", "overrides")}
+                block.meta = {**block.meta, **extra}
                 if not block.meta.get("stale"):
                     block.meta.pop("stale", None)
             changed += 1
@@ -413,6 +423,7 @@ async def preview_chapter(
         language=language,
         use_translation=translated,
         css_href=f"/api/projects/{project_id}/preview.css",
+        styled=document if book_styles.uses_styles(document) else None,
     )
     # Imagens do preview apontam para a rota de imagens do projeto.
     xhtml = xhtml.replace('src="../images/', f'src="/api/projects/{project_id}/images/')
@@ -421,7 +432,63 @@ async def preview_chapter(
 
 @router.get("/{project_id}/preview.css")
 async def preview_css(project_id: str) -> Response:
-    return Response(DEFAULT_CSS, media_type="text/css")
+    """O mesmo style.css da exportação, com os estilos de parágrafo do livro."""
+    document = await _load(get_store(), project_id)
+    # Muda a cada edição de estilo: o navegador não pode guardar.
+    return Response(
+        book_css(document), media_type="text/css", headers={"Cache-Control": "no-store"}
+    )
+
+
+# --------------------------------------------------------------------------
+# Estilos de parágrafo (core/styles.py)
+# --------------------------------------------------------------------------
+
+
+@router.get("/{project_id}/styles")
+async def list_styles(project_id: str) -> dict[str, Any]:
+    """Os estilos do livro com os valores finais, e a descrição das propriedades."""
+    document = await _load(get_store(), project_id)
+    return {"styles": book_styles.describe(document), "schema": book_styles.schema()}
+
+
+@router.post("/{project_id}/styles")
+async def create_style(project_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """Um estilo novo a partir de um pronto: {"name": "Epígrafe", "based_on": "quote"}."""
+
+    def change(document: Document) -> dict[str, Any]:
+        style_id = book_styles.create_style(
+            document, payload.get("name"), payload.get("based_on"), new_id()
+        )
+        if "props" in payload:
+            book_styles.update_style(document, style_id, payload["props"])
+        return {"id": style_id, "styles": book_styles.describe(document)}
+
+    return await _update(get_store(), project_id, change)
+
+
+@router.patch("/{project_id}/styles/{style_id}")
+async def update_style(
+    project_id: str, style_id: str, payload: dict[str, Any] = Body(...)
+) -> dict[str, Any]:
+    """Muda propriedades ({"props": {"indent": 2}}; null apaga) e, nos do usuário, o nome."""
+
+    def change(document: Document) -> dict[str, Any]:
+        book_styles.update_style(document, style_id, payload.get("props"), payload.get("name"))
+        return {"styles": book_styles.describe(document)}
+
+    return await _update(get_store(), project_id, change)
+
+
+@router.delete("/{project_id}/styles/{style_id}")
+async def delete_style(project_id: str, style_id: str) -> dict[str, Any]:
+    """Estilo pronto volta ao padrão; o do usuário some e os blocos dele voltam ao automático."""
+
+    def change(document: Document) -> dict[str, Any]:
+        moved = book_styles.delete_style(document, style_id)
+        return {"moved": moved, "styles": book_styles.describe(document)}
+
+    return await _update(get_store(), project_id, change)
 
 
 @router.get("/{project_id}/images/{name}")
@@ -531,6 +598,9 @@ async def _update(store: ProjectStore, project_id: str, change: Callable[[Docume
         return await asyncio.to_thread(store.update, project_id, change)
     except editing.EditError as exc:
         raise HTTPException(exc.status, exc.message) from exc
+    except book_styles.StyleError as exc:
+        # Antes do ValueError: StyleError é um, e não é "projeto não encontrado".
+        raise HTTPException(400, str(exc)) from exc
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(404, "Projeto não encontrado") from exc
 

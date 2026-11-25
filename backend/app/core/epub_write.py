@@ -17,6 +17,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import styles as book_styles
 from .blocks import Block, Chapter, Document
 
 CONTAINER_XML = """<?xml version="1.0" encoding="UTF-8"?>
@@ -146,8 +147,12 @@ def inline_html(text: str) -> str:
     return escaped
 
 
-def _block_to_xhtml(block: Block, *, use_translation: bool) -> str:
-    """Converte um bloco em um fragmento XHTML."""
+def _block_to_xhtml(block: Block, *, use_translation: bool, styling: str = "") -> str:
+    """Converte um bloco em um fragmento XHTML.
+
+    `styling` são os atributos de estilo (class e style) já prontos, ou vazio
+    num livro que não usa estilos.
+    """
     text = block.display_text if use_translation else block.text
 
     if block.kind == "page_break":
@@ -165,6 +170,8 @@ def _block_to_xhtml(block: Block, *, use_translation: bool) -> str:
     anchor = f' id="b{block.id}"'
     if block.kind == "table":
         return _table_xhtml(text, anchor, header=bool(block.meta.get("header")))
+    # Depois do id: class e style do estilo de parágrafo, quando o livro usa.
+    anchor += styling
 
     body = inline_html(text)
 
@@ -254,14 +261,22 @@ def chapter_to_xhtml(
     language: str = "pt-BR",
     use_translation: bool = True,
     css_href: str = "../style.css",
+    styled: Document | None = None,
 ) -> str:
     """Gera o XHTML completo de um capítulo.
 
     Itens de lista consecutivos são embrulhados num <ul> para que o documento
     seja XHTML válido.
+
+    `styled` é o livro, quando ele usa estilos de parágrafo (book_styles.
+    uses_styles): cada bloco de texto ganha a classe do estilo e o ajuste
+    próprio em style="". Sem ele, o XHTML sai como sempre saiu.
     """
     parts: list[str] = []
     in_list = False
+    # Tipo do último bloco que entrou no XHTML: o parágrafo logo depois de um
+    # título é "Primeiro parágrafo" (book_styles.default_style).
+    previous_kind: str | None = None
     notes = [
         block
         for block in chapter.blocks
@@ -274,9 +289,17 @@ def chapter_to_xhtml(
     for block in chapter.blocks:
         if block.kind == "footnote":
             continue
-        fragment = _block_to_xhtml(block, use_translation=use_translation)
+        styling = ""
+        if styled is not None and block.kind in book_styles.STYLED_KINDS:
+            style_id = book_styles.block_style(styled, block, previous_kind)
+            styling = f' class="{book_styles.class_name(style_id)}"'
+            inline = book_styles.inline_style(block)
+            if inline:
+                styling += f' style="{html.escape(inline, quote=True)}"'
+        fragment = _block_to_xhtml(block, use_translation=use_translation, styling=styling)
         if not fragment:
             continue
+        previous_kind = block.kind
         if pending:
             fragment = _link_note_calls(fragment, pending, linked)
 
@@ -413,6 +436,13 @@ def _content_opf(document: Document, filenames: list[str], language: str) -> str
 """
 
 
+def book_css(document: Document) -> str:
+    """O style.css do livro: o padrão e, se ele usa, os estilos de parágrafo."""
+    if not book_styles.uses_styles(document):
+        return DEFAULT_CSS
+    return DEFAULT_CSS + "\n" + book_styles.stylesheet(document)
+
+
 def write_epub(
     document: Document,
     output_path: str | Path,
@@ -438,7 +468,8 @@ def write_epub(
             compress_type=zipfile.ZIP_STORED,
         )
         epub.writestr("META-INF/container.xml", CONTAINER_XML)
-        epub.writestr("OEBPS/style.css", DEFAULT_CSS)
+        styled = document if book_styles.uses_styles(document) else None
+        epub.writestr("OEBPS/style.css", book_css(document))
         epub.writestr("OEBPS/content.opf", _content_opf(document, filenames, language))
         epub.writestr("OEBPS/nav.xhtml", _nav_xhtml(document, filenames, language))
         epub.writestr("OEBPS/toc.ncx", _toc_ncx(document, filenames))
@@ -446,7 +477,9 @@ def write_epub(
         for chapter, name in zip(document.chapters, filenames):
             epub.writestr(
                 f"OEBPS/text/{name}",
-                chapter_to_xhtml(chapter, language=language, use_translation=use_translation),
+                chapter_to_xhtml(
+                    chapter, language=language, use_translation=use_translation, styled=styled
+                ),
             )
 
         for image_name, data in document.images.items():
