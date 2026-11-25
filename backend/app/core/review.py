@@ -83,7 +83,10 @@ def find_suspects(document: Document) -> list[Suspect]:
 
     for chapter in document.chapters:
         if len(document.chapters) > 1:
-            words = sum(len(_plain(b.text).split()) for b in chapter.blocks)
+            # O sinal do separador de cena ("* * *") não é texto do livro.
+            words = sum(
+                len(_plain(b.text).split()) for b in chapter.blocks if b.kind != "scene_break"
+            )
             if words < SHORT_CHAPTER_WORDS:
                 first = chapter.blocks[0].id if chapter.blocks else None
                 mark(chapter.id, first, "short_chapter", f"{words} palavras")

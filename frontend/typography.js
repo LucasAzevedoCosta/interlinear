@@ -80,6 +80,8 @@ const Typography = (() => {
   // parágrafo logo depois de um título é "Primeiro parágrafo".
   function autoStyle(block) {
     if (block.kind !== 'paragraph') return block.kind;
+    // Como _OPENS_SECTION em core/styles.py.
+    const opensSection = (kind) => HEADINGS.has(kind) || kind === 'scene_break' || kind === 'spacer';
     const chapter = chapterOf(block);
     if (!chapter) return 'paragraph';
     const translated = state.stage === 'translate' && state.previewTranslated;
@@ -87,11 +89,11 @@ const Typography = (() => {
       const previous = chapter.blocks[i];
       if (previous.kind === 'footnote') continue;
       if (previous.kind === 'image' && !previous.src) continue;
-      if (previous.kind !== 'image' && previous.kind !== 'page_break') {
+      if (!['image', 'page_break', 'scene_break', 'spacer'].includes(previous.kind)) {
         const text = translated ? (previous.translated ?? previous.text) : previous.text;
         if (!(text || '').trim()) continue; // bloco vazio não entra no XHTML
       }
-      return HEADINGS.has(previous.kind) ? 'first_paragraph' : 'paragraph';
+      return opensSection(previous.kind) ? 'first_paragraph' : 'paragraph';
     }
     return 'paragraph';
   }
@@ -107,7 +109,12 @@ const Typography = (() => {
   }
 
   function effectiveOf(block) {
-    return { ...(styleById(styleOf(block))?.props || {}), ...overridesOf(block) };
+    return { ...styleValues(block), ...overridesOf(block) };
+  }
+
+  // Os valores do estilo do bloco, sem o ajuste dele.
+  function styleValues(block) {
+    return styleById(styleOf(block))?.props || {};
   }
 
   /* --------------------------------------------------------- gravação */
@@ -126,14 +133,19 @@ const Typography = (() => {
       renderAll();
       return;
     }
-    let merged = changes === null ? {} : { ...overridesOf(block) };
+    mergeLocal(block, changes);
+    afterChange();
+  }
+
+  // Aplica no state.doc o mesmo que o servidor fez com o ajuste.
+  function mergeLocal(block, changes) {
+    const merged = changes === null ? {} : { ...overridesOf(block) };
     for (const [name, value] of Object.entries(changes || {})) {
       if (value === null) delete merged[name];
       else merged[name] = value;
     }
     const { overrides: _, ...meta } = block.meta || {};
     block.meta = Object.keys(merged).length ? { ...meta, overrides: merged } : meta;
-    afterChange();
   }
 
   async function setBlockStyle(block, styleId) {
@@ -216,6 +228,7 @@ const Typography = (() => {
 
   function afterChange() {
     renderAll();
+    Spacing.refresh(); // o espaço entre blocos vem dos estilos
     refreshPreview();
   }
 
@@ -345,7 +358,10 @@ const Typography = (() => {
     if (!block) return 'Clique num bloco do texto para ver e mudar a formatação dele.';
     if (!STYLED.has(block.kind)) {
       const name = KIND_LABELS[block.kind]
-        || { image: 'Imagem', page_break: 'Quebra de página' }[block.kind]
+        || {
+          image: 'Imagem', page_break: 'Quebra de página',
+          scene_break: 'Separador de cena', spacer: 'Linha em branco',
+        }[block.kind]
         || 'Este bloco';
       return `${name} não usa estilo de parágrafo.`;
     }
@@ -622,6 +638,13 @@ const Typography = (() => {
   wire();
 
   return {
+    // Para o spacing.js, que muda o espaço entre blocos com o mesmo ajuste.
+    STYLED,
+    effectiveOf,
+    styleValues,
+    overridesOf,
+    mergeLocal,
+    renderPanels: () => renderAll(),
     // Livro novo: esquece seleção e estilos e lê os do livro.
     async reset() {
       selectedId = null;
@@ -632,6 +655,7 @@ const Typography = (() => {
       renderAll();
       await load();
       renderAll();
+      Spacing.refresh();
     },
     // O app.js redesenhou o texto (troca de capítulo, junção, etapa): a
     // seleção pode ter sumido (blocos juntados ganham id novo).

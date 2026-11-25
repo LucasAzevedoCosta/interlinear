@@ -267,6 +267,11 @@ def style_name(document: Document, style_id: str) -> str:
     return str(entry.get("name") or "Sem nome") if isinstance(entry, dict) else style_id
 
 
+# Depois destes, o parágrafo começa sem recuo: títulos, e a troca de cena
+# (separador ou linha em branco), como manda a tipografia de livro.
+_OPENS_SECTION = frozenset({"heading1", "heading2", "heading3", "scene_break", "spacer"})
+
+
 def default_style(kind: str, previous_kind: str | None) -> str:
     """O estilo de um bloco que não escolheu nenhum.
 
@@ -274,7 +279,7 @@ def default_style(kind: str, previous_kind: str | None) -> str:
     faz isso com h1 + p, mas a classe do estilo ganharia daquela regra; aqui a
     decisão é tomada antes de gerar o XHTML.
     """
-    if kind == "paragraph" and previous_kind in ("heading1", "heading2", "heading3"):
+    if kind == "paragraph" and previous_kind in _OPENS_SECTION:
         return "first_paragraph"
     return kind
 

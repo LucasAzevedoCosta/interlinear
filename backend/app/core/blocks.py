@@ -28,6 +28,11 @@ BlockKind = Literal[
     "table",
     "image",
     "page_break",
+    # Separador de cena ("* * *"): o texto do bloco é o próprio sinal, que
+    # não se traduz. Inserido pelo usuário na bancada.
+    "scene_break",
+    # Linha em branco: um respiro de uma linha entre dois blocos.
+    "spacer",
 ]
 
 # Tipos cujo texto faz sentido traduzir.

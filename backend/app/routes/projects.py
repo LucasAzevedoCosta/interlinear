@@ -352,14 +352,20 @@ async def merge_block_with_next(project_id: str, block_id: str) -> dict[str, Any
     return await _update_with_meta(get_store(), project_id, change)
 
 
+# O que o usuário pode inserir entre os blocos, e o texto com que nasce.
+INSERTABLE_KINDS = {"paragraph": "", "scene_break": "* * *", "spacer": "", "page_break": ""}
+
+
 @router.post("/{project_id}/chapters/{chapter_id}/blocks")
 async def insert_block(
     project_id: str, chapter_id: str, payload: dict[str, Any] = Body(...)
 ) -> dict[str, Any]:
     """Insere um bloco na posição `index` do capítulo.
 
-    Sem `block`, cria um parágrafo vazio para o usuário escrever o original. Com
-    `block` (o que delete_block devolveu), restaura um bloco apagado, mesmo id.
+    Sem `block`, cria um bloco novo do tipo `kind`: um parágrafo vazio para o
+    usuário escrever o original (o padrão), um separador de cena, uma linha
+    em branco ou uma quebra de página. Com `block` (o que delete_block
+    devolveu), restaura um bloco apagado, mesmo id.
     """
     try:
         index = int(payload.get("index", 0))
@@ -368,6 +374,9 @@ async def insert_block(
     data = payload.get("block") or {}
     if not isinstance(data, dict):
         raise HTTPException(400, "Campo 'block' deve ser um objeto")
+    kind = payload.get("kind") or "paragraph"
+    if kind not in INSERTABLE_KINDS:
+        raise HTTPException(400, f"Tipo de bloco que não se insere: {kind}")
 
     def change(document: Document) -> dict[str, Any]:
         chapter = editing.find_chapter(document, chapter_id)
@@ -376,7 +385,7 @@ async def insert_block(
             if block.id in document.block_index():
                 raise HTTPException(409, "Já existe um bloco com esse id")
         else:
-            block = Block(kind="paragraph", meta={"inserted": True})
+            block = Block(kind=kind, text=INSERTABLE_KINDS[kind], meta={"inserted": True})
         position = max(0, min(index, len(chapter.blocks)))
         chapter.blocks.insert(position, block)
         return {"chapter": chapter.to_dict(), "block": block.to_dict()}

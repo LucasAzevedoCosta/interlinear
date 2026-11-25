@@ -105,6 +105,15 @@ section.footnotes {
   font-size: 0.85em;
 }
 section.footnotes p { text-indent: 0; margin: 0.5em 0; }
+/* Separador de cena (* * *) e linha em branco, inseridos na bancada. O
+   parágrafo que vem depois de uma troca de cena começa sem recuo. */
+p.scene-break {
+  text-indent: 0;
+  text-align: center;
+  margin: 1em 0;
+}
+p.spacer { text-indent: 0; margin: 0; }
+p.scene-break + p, p.spacer + p { text-indent: 0; }
 hr.page-break {
   border: 0;
   page-break-after: always;
@@ -157,6 +166,14 @@ def _block_to_xhtml(block: Block, *, use_translation: bool, styling: str = "") -
 
     if block.kind == "page_break":
         return '<hr class="page-break"/>'
+
+    if block.kind == "scene_break":
+        sign = html.escape((text or "").strip() or "* * *")
+        return f'<p id="b{block.id}" class="scene-break">{sign}</p>'
+
+    if block.kind == "spacer":
+        # O espaço sem quebra impede o leitor de descartar o parágrafo vazio.
+        return f'<p id="b{block.id}" class="spacer">&#160;</p>'
 
     if block.kind == "image":
         if not block.src:

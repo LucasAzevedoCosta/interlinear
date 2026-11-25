@@ -714,7 +714,7 @@ function applyStage() {
 
 function chapterProgress(chapter) {
   const translatable = chapter.blocks.filter(
-    (b) => b.text.trim() && b.kind !== 'image' && b.kind !== 'page_break'
+    (b) => b.text.trim() && !NON_TEXT_KINDS.has(b.kind)
   );
   const done = translatable.filter((b) => b.translated && b.translated.trim());
   const stale = done.filter((b) => b.meta?.stale);
@@ -791,8 +791,12 @@ function currentChapter() {
 const MARKS = {
   heading1: 'H1', heading2: 'H2', heading3: 'H3',
   paragraph: '¶', quote: '❝', list_item: '•', footnote: '†', table: '▦',
-  image: '▣', page_break: '⎯',
+  image: '▣', page_break: '⎯', scene_break: '⁂', spacer: '␣',
 };
+
+// Blocos sem texto para traduzir: imagem, e o espaçamento inserido na
+// bancada (o sinal do separador de cena não se traduz).
+const NON_TEXT_KINDS = new Set(['image', 'page_break', 'scene_break', 'spacer']);
 
 const KIND_LABELS = {
   heading1: 'Título 1', heading2: 'Título 2', heading3: 'Título 3',
@@ -862,7 +866,11 @@ function renderEditor() {
   }
 
   chapter.blocks.forEach((block, index) => {
-    inner.append(renderBlock(block, chapter.blocks[index + 1]));
+    const next = chapter.blocks[index + 1];
+    inner.append(renderBlock(block, next));
+    // Entre um bloco e o seguinte: a alça do espaço e o "+" de inserir
+    // (spacing.js). Depois do último, só o "+".
+    inner.append(Spacing.gap(block, next || null));
   });
   // Blocos juntados ou trocados mudam as caixas da página no painel Original
   // e podem tirar o bloco selecionado dos painéis de tipografia.
@@ -913,6 +921,13 @@ function renderBlock(block, next) {
   wrapper.append(renderMark(block));
   const converting = state.stage === 'convert';
 
+  if (block.kind === 'page_break' || block.kind === 'scene_break' || block.kind === 'spacer') {
+    wrapper.append(renderBreak(block));
+    if (converting) wrapper.append(renderStructureTools(block, next, wrapper));
+    else wrapper.append(renderBreakRemove(block));
+    return wrapper;
+  }
+
   if (block.kind === 'image') {
     const img = document.createElement('p');
     img.className = 'block__source';
@@ -935,6 +950,47 @@ function renderBlock(block, next) {
     renderTranslation(block, wrapper);
   }
   return wrapper;
+}
+
+// Separador de cena, linha em branco e quebra de página: o que eles fazem na
+// página, desenhado no lugar. O sinal do separador se edita na conversão.
+function renderBreak(block) {
+  const box = document.createElement('div');
+  box.className = 'block__break';
+  if (block.kind === 'scene_break') {
+    const sign = document.createElement('input');
+    sign.className = 'block__sign';
+    sign.value = block.text;
+    sign.maxLength = 20;
+    sign.readOnly = state.stage !== 'convert';
+    sign.setAttribute('aria-label', 'Sinal do separador de cena');
+    sign.title = state.stage === 'convert' ? 'O sinal do separador: * * *, ⁂, ~…' : 'Muda na etapa de conversão';
+    sign.oninput = () => {
+      block.text = sign.value;
+      queueUpdate(block.id, { text: block.text });
+    };
+    sign.onblur = () => flushSaves();
+    box.append(sign);
+  } else {
+    const label = document.createElement('span');
+    label.className = 'block__break-label';
+    label.textContent = block.kind === 'spacer' ? 'linha em branco' : 'quebra de página';
+    box.append(label);
+  }
+  box.dataset.kind = block.kind;
+  return box;
+}
+
+// Na tradução, o espaçamento também pode sair: só o botão de apagar.
+function renderBreakRemove(block) {
+  const tools = document.createElement('div');
+  tools.className = 'block__tools';
+  const remove = document.createElement('button');
+  remove.className = 'block__tool block__tool--danger';
+  remove.textContent = 'Apagar';
+  remove.onclick = () => deleteBlock(block);
+  tools.append(remove);
+  return tools;
 }
 
 // Conversão: o original aparece formatado; um clique troca por um campo com o
