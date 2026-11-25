@@ -120,8 +120,22 @@ const Typography = (() => {
   /* --------------------------------------------------------- gravação */
 
   // Muda o ajuste do bloco: só o enviado; null numa propriedade a tira; null
-  // no lugar do objeto limpa o ajuste inteiro.
-  async function setOverrides(block, changes) {
+  // no lugar do objeto limpa o ajuste inteiro. Entra no histórico (⌘Z).
+  async function setOverrides(block, changes, label = 'ajuste do bloco') {
+    const before = { ...overridesOf(block) };
+    if (!(await sendOverrides(block, changes))) return false;
+    const after = { ...overridesOf(block) };
+    const id = block.id;
+    History.record({
+      label,
+      undo: () => replaceOverrides(id, before),
+      redo: () => replaceOverrides(id, after),
+    });
+    afterChange();
+    return true;
+  }
+
+  async function sendOverrides(block, changes) {
     try {
       await api(`/api/projects/${state.project.id}/blocks`, {
         method: 'PATCH',
@@ -131,10 +145,27 @@ const Typography = (() => {
     } catch (error) {
       toast(error.message, 'error');
       renderAll();
-      return;
+      return false;
     }
     mergeLocal(block, changes);
+    return true;
+  }
+
+  // Deixa o ajuste do bloco igual a `target` (para desfazer e refazer).
+  async function replaceOverrides(blockId, target) {
+    const block = blockById(blockId);
+    if (!block) {
+      toast('Esse bloco não existe mais (foi apagado ou juntado).', 'error');
+      return false;
+    }
+    const current = overridesOf(block);
+    const changes = {};
+    for (const name of new Set([...Object.keys(current), ...Object.keys(target)])) {
+      if (current[name] !== target[name]) changes[name] = name in target ? target[name] : null;
+    }
+    if (Object.keys(changes).length && !(await sendOverrides(block, changes))) return false;
     afterChange();
+    return true;
   }
 
   // Aplica no state.doc o mesmo que o servidor fez com o ajuste.
@@ -149,6 +180,19 @@ const Typography = (() => {
   }
 
   async function setBlockStyle(block, styleId) {
+    const before = block.meta?.style || null;
+    if (!(await sendBlockStyle(block, styleId))) return false;
+    const id = block.id;
+    History.record({
+      label: 'estilo do bloco',
+      undo: () => restoreBlockStyle(id, before),
+      redo: () => restoreBlockStyle(id, styleId),
+    });
+    afterChange();
+    return true;
+  }
+
+  async function sendBlockStyle(block, styleId) {
     try {
       await api(`/api/projects/${state.project.id}/blocks`, {
         method: 'PATCH',
@@ -157,11 +201,48 @@ const Typography = (() => {
       });
     } catch (error) {
       toast(error.message, 'error');
-      return;
+      return false;
     }
     const { style: _, ...meta } = block.meta || {};
     block.meta = styleId ? { ...meta, style: styleId } : meta;
+    return true;
+  }
+
+  async function restoreBlockStyle(blockId, styleId) {
+    const block = blockById(blockId);
+    if (!block) {
+      toast('Esse bloco não existe mais (foi apagado ou juntado).', 'error');
+      return false;
+    }
+    if (!(await sendBlockStyle(block, styleId))) return false;
     afterChange();
+    return true;
+  }
+
+  // Conta-gotas (tools.js): o estilo e o ajuste de `source` passam para
+  // `target`. Uma entrada só no histórico para as duas coisas.
+  async function copyFormat(source, target) {
+    if (!STYLED.has(source.kind) || !STYLED.has(target.kind) || source.id === target.id) return false;
+    const snapshot = (block) => ({ style: block.meta?.style || null, overrides: { ...overridesOf(block) } });
+    const apply = async (blockId, format) => {
+      const block = blockById(blockId);
+      if (!block) {
+        toast('Esse bloco não existe mais (foi apagado ou juntado).', 'error');
+        return false;
+      }
+      if (!(await sendBlockStyle(block, format.style))) return false;
+      return replaceOverrides(blockId, format.overrides);
+    };
+    const before = snapshot(target);
+    const after = snapshot(source);
+    if (!(await apply(target.id, after))) return false;
+    const id = target.id;
+    History.record({
+      label: 'formatação copiada',
+      undo: () => apply(id, before),
+      redo: () => apply(id, after),
+    });
+    return true;
   }
 
   async function styleRequest(path, options) {
@@ -178,10 +259,44 @@ const Typography = (() => {
     }
   }
 
-  async function updateStyle(styleId, body) {
-    if (await styleRequest(`/${encodeURIComponent(styleId)}`, {
+  // Muda um estilo do livro. Entra no histórico com o que o estilo tinha.
+  async function updateStyle(styleId, body, label) {
+    const style = styleById(styleId);
+    const before = { changes: { ...(style?.changes || {}) }, name: style?.name };
+    if (!(await styleRequest(`/${encodeURIComponent(styleId)}`, {
       method: 'PATCH', body: JSON.stringify(body),
-    })) afterChange();
+    }))) return false;
+    const now = styleById(styleId);
+    const after = { changes: { ...(now?.changes || {}) }, name: now?.name };
+    History.record({
+      label: label || `estilo “${now?.name || styleId}”`,
+      undo: () => restoreStyle(styleId, before),
+      redo: () => restoreStyle(styleId, after),
+    });
+    afterChange();
+    return true;
+  }
+
+  // Deixa o estilo com as mudanças (e o nome) de `target`.
+  async function restoreStyle(styleId, target) {
+    const style = styleById(styleId);
+    if (!style) {
+      toast('Esse estilo não existe mais.', 'error');
+      return false;
+    }
+    const current = style.changes || {};
+    const props = {};
+    for (const name of new Set([...Object.keys(current), ...Object.keys(target.changes)])) {
+      if (current[name] !== target.changes[name]) props[name] = name in target.changes ? target.changes[name] : null;
+    }
+    const body = {};
+    if (Object.keys(props).length) body.props = props;
+    if (!style.builtin && target.name && target.name !== style.name) body.name = target.name;
+    if (Object.keys(body).length && !(await styleRequest(`/${encodeURIComponent(styleId)}`, {
+      method: 'PATCH', body: JSON.stringify(body),
+    }))) return false;
+    afterChange();
+    return true;
   }
 
   async function createStyleFrom(base) {
@@ -205,9 +320,18 @@ const Typography = (() => {
       ? `Voltar “${style.name}” ao padrão? As mudanças feitas nele somem.`
       : `Apagar o estilo “${style.name}”? Os blocos que o usam voltam ao estilo automático.`;
     if (!window.confirm(question)) return;
+    const before = { changes: { ...(style.changes || {}) }, name: style.name };
     const data = await styleRequest(`/${encodeURIComponent(style.id)}`, { method: 'DELETE' });
     if (!data) return;
-    if (!style.builtin) {
+    if (style.builtin) {
+      // Voltar ao padrão se desfaz; apagar um estilo do usuário, não (o id
+      // novo de um estilo recriado não seria o mesmo dos blocos que o usavam).
+      History.record({
+        label: `“${style.name}” de volta ao padrão`,
+        undo: () => restoreStyle(style.id, before),
+        redo: () => restoreStyle(style.id, { changes: {}, name: style.name }),
+      });
+    } else {
       for (const chapter of state.doc.chapters) {
         for (const block of chapter.blocks) {
           if (block.meta?.style === style.id) {
@@ -447,7 +571,7 @@ const Typography = (() => {
         tool('x₂', 'Subscrito', () => toggleTag('sub')),
         tool('⌫', 'Tirar a formatação do trecho', clearTags)),
       h('p', { class: 'tpanel__hint',
-        text: 'Selecione um trecho num campo de texto e clique. Clicar de novo desfaz.' }));
+        text: 'Selecione um trecho do texto e clique. Clicar de novo desfaz. ⌘B e ⌘I também.' }));
 
     const block = selectedBlock();
     const problem = blockProblem(block);
@@ -538,15 +662,38 @@ const Typography = (() => {
 
   function targetField() {
     const active = document.activeElement;
-    if (active?.tagName === 'TEXTAREA' && active.closest('#editorInner')) return active;
+    if (active?.closest?.('#editorInner') && active.matches('textarea, .block__rich')) return active;
     if (lastField?.isConnected && !lastField.hidden) return lastField;
     return null;
+  }
+
+  // Comando de formatação do navegador para cada tag, nos campos formatados.
+  const COMMANDS = { strong: 'bold', em: 'italic', sup: 'superscript', sub: 'subscript' };
+
+  // Campo formatado (richtext.js): a seleção é do documento, e o navegador
+  // aplica e desfaz a formatação. Devolve false se não deu.
+  function formatRich(field, command) {
+    const selection = window.getSelection();
+    if (!selection.rangeCount || selection.isCollapsed || !field.contains(selection.anchorNode)) {
+      toast('Selecione o trecho que quer formatar.');
+      return true;
+    }
+    if (field.contentEditable !== 'true') {
+      toast('Para mudar o texto, use a ferramenta Texto (T).');
+      return true;
+    }
+    RichText.format(command);
+    return true;
   }
 
   function toggleTag(tag) {
     const field = targetField();
     if (!field) {
       toast('Clique no texto para editar e selecione um trecho.');
+      return;
+    }
+    if (field.classList.contains('block__rich')) {
+      formatRich(field, COMMANDS[tag]);
       return;
     }
     const { selectionStart: start, selectionEnd: end, value } = field;
@@ -579,6 +726,10 @@ const Typography = (() => {
     const field = targetField();
     if (!field) {
       toast('Clique no texto para editar e selecione um trecho.');
+      return;
+    }
+    if (field.classList.contains('block__rich')) {
+      formatRich(field, 'removeFormat');
       return;
     }
     const { selectionStart: start, selectionEnd: end, value } = field;
@@ -619,7 +770,7 @@ const Typography = (() => {
       if (wrapper) select(wrapper.dataset.id);
     };
     editor.addEventListener('focusin', (event) => {
-      if (event.target.tagName === 'TEXTAREA') lastField = event.target;
+      if (event.target.matches?.('textarea, .block__rich')) lastField = event.target;
       pick(event);
     });
     editor.addEventListener('click', pick);
@@ -644,6 +795,11 @@ const Typography = (() => {
     styleValues,
     overridesOf,
     mergeLocal,
+    replaceOverrides,
+    copyFormat,
+    styles: () => styles,
+    selected: () => selectedBlock(),
+    setBlockStyle,
     renderPanels: () => renderAll(),
     // Livro novo: esquece seleção e estilos e lê os do livro.
     async reset() {
@@ -651,6 +807,7 @@ const Typography = (() => {
       editingStyle = null;
       lastField = null;
       loadedFor = null;
+      History.clear(); // o histórico é de um livro
       styles = [];
       renderAll();
       await load();

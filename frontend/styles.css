@@ -152,6 +152,53 @@ button {
   border: 0;
 }
 
+/* ------------------------------------------------------------- ferramentas
+
+   A barra vertical à esquerda da bancada (tools.js), como a do InDesign. */
+
+.tools {
+  flex: 0 0 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 0;
+  background: var(--bench);
+  border-right: 1px solid var(--rule);
+  overflow-y: auto;
+}
+
+.tools__button {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius);
+  color: var(--on-bench-dim);
+}
+
+.tools__button:hover:not(:disabled) { color: var(--on-bench); background: var(--bench-raised); }
+.tools__button[aria-pressed="true"] { background: var(--pencil-deep); color: #fff; }
+.tools__button:disabled { opacity: 0.35; cursor: default; }
+
+.tools__sep { width: 22px; border-top: 1px solid var(--rule); margin: 5px 0; }
+.tools__zoom { font-size: 10px; color: var(--on-bench-dim); font-variant-numeric: tabular-nums; }
+
+/* Zoom do texto no editor (só a tela: o livro não muda). */
+.editor__inner { zoom: var(--editor-zoom, 1); }
+
+/* Espaçamento: todas as faixas com o valor à vista. */
+#editor[data-tool="spacing"] .gap__pill { opacity: 1; }
+#editor[data-tool="spacing"] .gap__handle::before { border-top-color: rgba(55, 142, 240, 0.55); }
+
+/* Selecionar e conta-gotas: o texto não se edita. */
+#editor[data-tool="select"] .block { cursor: default; }
+#editor[data-tool="select"] .block__rich { cursor: default; }
+#editor[data-tool="eyedropper"] .block,
+#editor[data-tool="eyedropper"] .block__rich { cursor: copy; }
+#editor[data-tool="eyedropper"] .block:hover { box-shadow: inset 2px 0 0 var(--pencil); }
+
 /* Visível só para leitores de tela. */
 .visually-hidden {
   position: absolute;
@@ -516,11 +563,28 @@ button {
 }
 
 .block__text:focus-visible { outline-offset: 4px; }
-.block__text[data-empty="true"]::before {
-  content: "texto que faltou na conversão: clique para escrever";
+/* Campo formatado (richtext.js): o texto já com itálico e negrito. */
+.block__rich {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  outline: none;
+  min-height: 1.6em;
+  cursor: text;
+}
+
+.block__rich[data-empty="true"]::before {
+  content: attr(data-placeholder);
   color: #b3ada3;
   font-style: italic;
+  pointer-events: none;
 }
+
+.block__rich[contenteditable="true"]:focus {
+  box-shadow: 0 1px 0 var(--pencil);
+}
+
+.block__rich sup, .block__rich sub { font-size: 0.7em; line-height: 0; }
+.block__rich small { font-size: 0.85em; }
 
 .block__text-field {
   display: block;

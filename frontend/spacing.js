@@ -94,6 +94,8 @@ const Spacing = (() => {
 
   async function save(updates) {
     if (!updates.length) return false;
+    // O ajuste de cada bloco antes e depois, para o ⌘Z (history.js).
+    const before = updates.map(({ block }) => [block.id, { ...Typography.overridesOf(block) }]);
     try {
       await api(`/api/projects/${state.project.id}/blocks`, {
         method: 'PATCH',
@@ -107,6 +109,19 @@ const Spacing = (() => {
       return false;
     }
     for (const { block, changes } of updates) Typography.mergeLocal(block, changes);
+    const after = updates.map(({ block }) => [block.id, { ...Typography.overridesOf(block) }]);
+    const restore = async (states) => {
+      for (const [id, overrides] of states) {
+        if (!(await Typography.replaceOverrides(id, overrides))) return false;
+      }
+      refresh();
+      return true;
+    };
+    History.record({
+      label: 'espaço entre blocos',
+      undo: () => restore(before),
+      redo: () => restore(after),
+    });
     Typography.renderPanels();
     refreshPreview();
     return true;
@@ -275,7 +290,7 @@ const Spacing = (() => {
       { method: 'POST', body: JSON.stringify({ index, kind }) },
       (data) => {
         if (kind === 'paragraph') {
-          document.querySelector(`.block[data-id="${data.block.id}"] .block__text`)?.click();
+          focusBlock(data.block.id);
         }
       }
     );
@@ -285,7 +300,7 @@ const Spacing = (() => {
 
   function shortcut(event) {
     if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
-    if (event.target.tagName !== 'TEXTAREA') return;
+    if (!event.target.closest?.('.block__rich, textarea')) return;
     let kind = null;
     if (event.key === 'Enter') kind = event.shiftKey ? 'spacer' : 'page_break';
     else if (event.shiftKey && event.code === 'Digit8') kind = 'scene_break';
@@ -315,5 +330,5 @@ const Spacing = (() => {
     for (const element of document.querySelectorAll('#editorInner .gap')) element.repaint?.();
   }
 
-  return { gap, closeMenu, refresh };
+  return { gap, closeMenu, refresh, insertAfter };
 })();

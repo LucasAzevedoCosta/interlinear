@@ -359,6 +359,18 @@ const Layout = (() => {
       ...(position ? { position } : {}) });
   }
 
+  // Recolher os painéis (Tab, como na Adobe): o grupo do Texto ocupa tudo;
+  // de novo, volta. Usa o "maximizar" do dockview, que não muda a área.
+  function toggleFocus() {
+    if (!api) return;
+    if (api.hasMaximizedGroup()) {
+      api.exitMaximizedGroup();
+      return;
+    }
+    const panel = api.getPanel('editor') || api.activePanel;
+    if (panel) api.maximizeGroup(panel);
+  }
+
   function floatActive() {
     const panel = api.activePanel;
     if (panel) api.addFloatingGroup(panel);
@@ -477,5 +489,5 @@ const Layout = (() => {
   wire();
   load();
 
-  return { open, close, switchTo, reset };
+  return { open, close, switchTo, reset, toggleFocus };
 })();

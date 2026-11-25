@@ -632,6 +632,7 @@ async function openProject(projectId) {
     // esteja o painel aberto ou estacionado.
     Original.reset();
     Layout.open();
+    Tools.open();
     Typography.reset();
     for (const id of ['homeBtn', 'exportBtn', 'bookBar']) $(id).hidden = false;
 
@@ -661,6 +662,7 @@ function goHome() {
   $('reviewBtn').hidden = true;
   $('start').hidden = false;
   Layout.close();
+  Tools.close();
   Original.reset();
   Typography.reset();
   for (const id of ['homeBtn', 'translateBtn', 'exportBtn', 'bookBar', 'progress']) $(id).hidden = true;
@@ -993,60 +995,52 @@ function renderBreakRemove(block) {
   return tools;
 }
 
-// Conversão: o original aparece formatado; um clique troca por um campo com o
-// texto cru, onde o itálico aparece como <em>…</em>.
+// Conversão: o original é editado já formatado (richtext.js): o itálico
+// aparece em itálico, não como <em>…</em>. A tabela, cujo texto tem
+// estrutura (" | " e linhas), continua num campo de texto cru.
 function renderSourceEditor(block) {
   const box = document.createElement('div');
 
-  const view = document.createElement('p');
-  view.className = 'block__text';
-  view.tabIndex = 0;
-  view.setAttribute('role', 'button');
-  view.title = 'Clique para corrigir o texto';
-
-  const field = document.createElement('textarea');
-  field.className = 'block__text block__text-field';
-  field.rows = 1;
-  field.hidden = true;
-  field.placeholder = 'texto que faltou na conversão';
-  field.setAttribute('aria-label', 'Texto original deste bloco');
-
-  const show = () => {
-    view.innerHTML = inlineHtml(block.text);
-    view.dataset.empty = !block.text.trim();
-  };
-  const open = () => {
-    view.hidden = true;
-    field.hidden = false;
-    field.value = block.text;
-    autoGrow(field);
-    field.focus();
-  };
-
-  view.onclick = open;
-  view.onkeydown = (event) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      open();
-    }
-  };
-  field.oninput = () => {
-    autoGrow(field);
-    block.text = field.value;
+  const changed = (text) => {
+    block.text = text;
     // O servidor marca o mesmo ao gravar; aqui é só para a tela concordar.
     if (block.translated) block.meta = { ...(block.meta || {}), stale: true };
     queueUpdate(block.id, { text: block.text });
   };
-  field.onblur = () => {
-    show();
-    field.hidden = true;
-    view.hidden = false;
-    flushSaves();
-  };
 
-  show();
-  box.append(view, field);
+  if (block.kind === 'table') {
+    const field = document.createElement('textarea');
+    field.className = 'block__text block__text-field';
+    field.rows = 1;
+    field.value = block.text;
+    field.setAttribute('aria-label', 'Texto da tabela: uma linha por linha, células separadas por |');
+    field.oninput = () => {
+      autoGrow(field);
+      changed(field.value);
+    };
+    field.onblur = () => flushSaves();
+    box.append(field);
+    requestAnimationFrame(() => autoGrow(field));
+    return box;
+  }
+
+  box.append(RichText.field({
+    value: block.text,
+    className: 'block__text',
+    placeholder: 'texto que faltou na conversão: clique para escrever',
+    label: 'Texto original deste bloco',
+    onInput: changed,
+    onBlur: () => flushSaves(),
+  }));
   return box;
+}
+
+// Põe o cursor no texto de um bloco (o parágrafo recém-inserido, por exemplo).
+function focusBlock(blockId) {
+  const field = document.querySelector(
+    `.block[data-id="${blockId}"] .block__rich, .block[data-id="${blockId}"] textarea`
+  );
+  field?.focus();
 }
 
 // Tradução: o original fixo em cima, o campo de tradução embaixo.
@@ -1096,33 +1090,52 @@ function renderTranslation(block, wrapper) {
     refused.hidden = true;
   };
 
-  const field = document.createElement('textarea');
-  field.className = 'block__field';
-  field.rows = 1;
-  field.value = block.translated || '';
-  field.placeholder = 'ainda não traduzido';
-  field.setAttribute('aria-label', 'Tradução deste parágrafo');
-
-  const grow = () => autoGrow(field);
-
-  field.oninput = () => {
-    grow();
-    block.translated = field.value;
+  // Tradução formatada (richtext.js), menos na tabela, que tem estrutura.
+  const translated = (text) => {
+    block.translated = text;
     block.meta = { ...(block.meta || {}), edited: true, stale: false };
     stale.hidden = true;
     dropRefusal();  // gravar a tradução desfaz a recusa no servidor também
     wrapper.dataset.state = blockState(block);
     markDirty(block);
   };
-  field.onblur = () => flushSaves();
+  let field;
+  let setField;
+  if (block.kind === 'table') {
+    field = document.createElement('textarea');
+    field.className = 'block__field';
+    field.rows = 1;
+    field.value = block.translated || '';
+    field.placeholder = 'ainda não traduzido';
+    field.setAttribute('aria-label', 'Tradução desta tabela');
+    field.oninput = () => {
+      autoGrow(field);
+      translated(field.value);
+    };
+    field.onblur = () => flushSaves();
+    setField = (text) => {
+      field.value = text;
+      autoGrow(field);
+    };
+    requestAnimationFrame(() => autoGrow(field));
+  } else {
+    field = RichText.field({
+      value: block.translated || '',
+      className: 'block__field',
+      placeholder: 'ainda não traduzido',
+      label: 'Tradução deste parágrafo',
+      onInput: translated,
+      onBlur: () => flushSaves(),
+    });
+    setField = (text) => field.setValue(text);
+  }
   accept.onclick = () => {
-    field.value = block.meta.refused;
-    field.dispatchEvent(new Event('input'));
+    setField(block.meta.refused);
+    translated(block.meta.refused);
     flushSaves();
   };
 
   wrapper.append(field);
-  requestAnimationFrame(grow);
 
   const tools = document.createElement('div');
   tools.className = 'block__tools';
@@ -1132,22 +1145,21 @@ function renderTranslation(block, wrapper) {
   copy.textContent = 'Usar original';
   copy.title = 'Copia o texto original para o campo de tradução';
   copy.onclick = () => {
-    field.value = block.text;
-    field.dispatchEvent(new Event('input'));
+    setField(block.text);
+    translated(block.text);
   };
 
   const clear = document.createElement('button');
   clear.className = 'block__tool';
   clear.textContent = 'Limpar';
   clear.onclick = () => {
-    field.value = '';
+    setField('');
     block.translated = null;
     block.meta = { ...(block.meta || {}), edited: false, stale: false };
     stale.hidden = true;
     dropRefusal();
     wrapper.dataset.state = 'pending';
     markDirty(block, true);
-    grow();
   };
 
   tools.append(copy, clear);
@@ -2022,7 +2034,7 @@ function insertBelow(block) {
     `/chapters/${chapter.id}/blocks`,
     { method: 'POST', body: JSON.stringify({ index }) },
     (data) => {
-      document.querySelector(`.block[data-id="${data.block.id}"] .block__text`)?.click();
+      focusBlock(data.block.id);
     }
   );
 }
