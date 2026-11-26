@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import styles as book_styles
-from .blocks import Block, Chapter, Document
+from .blocks import TRANSLATABLE, Block, Chapter, Document
 
 CONTAINER_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
@@ -114,6 +114,21 @@ p.scene-break {
 }
 p.spacer { text-indent: 0; margin: 0; }
 p.scene-break + p, p.spacer + p { text-indent: 0; }
+
+/* Formatos bilíngues: o original, menor e em itálico, logo acima da
+   tradução. Sem cor, para não sumir no modo noturno dos leitores. */
+.il-src {
+  display: block;
+  font-size: 0.85em;
+  font-style: italic;
+  text-indent: 0;
+  margin: 0.8em 0 0.15em;
+}
+.il-src em, .il-src i { font-style: normal; }
+h1 .il-src, h2 .il-src, h3 .il-src { font-weight: normal; margin: 0 0 0.3em; }
+li .il-src { margin: 0 0 0.1em; }
+blockquote .il-src { margin-top: 0; }
+table.il-src-table { font-size: 0.85em; font-style: italic; }
 hr.page-break {
   border: 0;
   page-break-after: always;
@@ -156,12 +171,19 @@ def inline_html(text: str) -> str:
     return escaped
 
 
-def _block_to_xhtml(block: Block, *, use_translation: bool, styling: str = "") -> str:
+def _block_to_xhtml(
+    block: Block, *, use_translation: bool, styling: str = "", bilingual: bool = False
+) -> str:
     """Converte um bloco em um fragmento XHTML.
 
     `styling` são os atributos de estilo (class e style) já prontos, ou vazio
     num livro que não usa estilos.
+
+    `bilingual` reserva o lugar do original (_SRC_SLOT) antes da tradução,
+    dentro do elemento quando o XHTML pede (título, item de lista, citação).
+    Quem chama troca o marcador pelo original depois de ligar as notas.
     """
+    slot = _SRC_SLOT if bilingual else ""
     text = block.display_text if use_translation else block.text
 
     if block.kind == "page_break":
@@ -186,27 +208,75 @@ def _block_to_xhtml(block: Block, *, use_translation: bool, styling: str = "") -
 
     anchor = f' id="b{block.id}"'
     if block.kind == "table":
-        return _table_xhtml(text, anchor, header=bool(block.meta.get("header")))
+        return slot + _table_xhtml(text, anchor, header=bool(block.meta.get("header")))
     # Depois do id: class e style do estilo de parágrafo, quando o livro usa.
     anchor += styling
 
     body = inline_html(text)
 
     if block.kind == "heading1":
-        return f"<h1{anchor}>{body}</h1>"
+        return f"<h1{anchor}>{slot}{body}</h1>"
     if block.kind == "heading2":
-        return f"<h2{anchor}>{body}</h2>"
+        return f"<h2{anchor}>{slot}{body}</h2>"
     if block.kind == "heading3":
-        return f"<h3{anchor}>{body}</h3>"
+        return f"<h3{anchor}>{slot}{body}</h3>"
     if block.kind == "quote":
-        return f"<blockquote{anchor}><p>{body}</p></blockquote>"
+        return f"<blockquote{anchor}>{slot}<p>{body}</p></blockquote>"
     if block.kind == "list_item":
-        return f"<li{anchor}>{body}</li>"
+        return f"<li{anchor}>{slot}{body}</li>"
 
-    return f"<p{anchor}>{body}</p>"
+    return f"{slot}<p{anchor}>{body}</p>"
 
 
-def _table_xhtml(text: str, anchor: str, *, header: bool) -> str:
+# --------------------------------------------------------------------------
+# Formatos do livro traduzido
+# --------------------------------------------------------------------------
+
+# "original" e "translated" são os de sempre; "paragraph" põe cada parágrafo
+# do original, menor e em itálico, logo antes da tradução dele.
+LAYOUTS = ("original", "translated", "paragraph")
+BILINGUAL_LAYOUTS = frozenset({"paragraph"})
+
+# Lugar do original dentro do fragmento da tradução. Trocado só depois de
+# ligar as chamadas de nota, para o <sup> do original não roubar o link.
+_SRC_SLOT = "\x00il-src\x00"
+
+
+def _lang_attrs(code: str) -> str:
+    code = html.escape(code, quote=True)
+    return f' lang="{code}" xml:lang="{code}"'
+
+
+def _source_xhtml(block: Block, source_language: str) -> str:
+    """O original de um bloco traduzido, no formato bilíngue.
+
+    Dentro de título e item de lista, um <span> (o XHTML não deixa <p> ali);
+    nos outros, um <p> antes da tradução. A tabela original vem inteira, antes
+    da traduzida.
+    """
+    lang = _lang_attrs(source_language)
+    if block.kind == "table":
+        return _table_xhtml(
+            block.text, lang, header=bool(block.meta.get("header")), extra_class="il-src-table"
+        )
+    body = inline_html(block.text)
+    if block.kind in ("heading1", "heading2", "heading3", "list_item"):
+        # O espaço separa os dois num leitor que ignore o CSS.
+        return f'<span class="il-src"{lang}>{body}</span> '
+    return f'<p class="il-src"{lang}>{body}</p>'
+
+
+def _is_bilingual(block: Block, layout: str) -> bool:
+    """O bloco sai nos dois idiomas? Só se há tradução: o não traduzido sai uma vez."""
+    return (
+        layout in BILINGUAL_LAYOUTS
+        and block.kind in TRANSLATABLE
+        and bool((block.translated or "").strip())
+        and bool(block.text.strip())
+    )
+
+
+def _table_xhtml(text: str, anchor: str, *, header: bool, extra_class: str = "") -> str:
     """Uma tabela a partir do texto "a | b\\nc | d" do bloco "table".
 
     Linhas com menos células que a mais cheia são completadas com células
@@ -214,7 +284,8 @@ def _table_xhtml(text: str, anchor: str, *, header: bool) -> str:
     """
     rows = [[cell.strip() for cell in line.split("|")] for line in text.split("\n") if line.strip()]
     width = max(len(row) for row in rows)
-    parts = [f'<table class="table"{anchor}>']
+    classes = f"table {extra_class}".strip()
+    parts = [f'<table class="{classes}"{anchor}>']
     for number, row in enumerate(rows):
         tag = "th" if header and number == 0 else "td"
         cells = "".join(
@@ -251,7 +322,14 @@ def _link_note_calls(fragment: str, pending: list[Block], linked: set[str]) -> s
     return _NOTE_CALL.sub(link, fragment)
 
 
-def _footnotes_xhtml(notes: list[Block], linked: set[str], *, use_translation: bool) -> str:
+def _footnotes_xhtml(
+    notes: list[Block],
+    linked: set[str],
+    *,
+    use_translation: bool,
+    layout: str = "translated",
+    source_language: str = "",
+) -> str:
     """As notas do capítulo, no fim dele, como <aside epub:type="footnote">.
 
     Leitores com suporte (Apple Books, Kobo, KOReader) mostram a nota numa
@@ -265,11 +343,29 @@ def _footnotes_xhtml(notes: list[Block], linked: set[str], *, use_translation: b
         if note.id in linked:
             marker = f'<a href="#r{note.id}">{marker}</a>'
         label = f'<span class="note-marker">{marker}</span> ' if marker else ""
+        if _is_bilingual(note, layout):
+            # O marcador vai na primeira linha, a do original.
+            lang = _lang_attrs(source_language)
+            content = (
+                f'<p class="il-src"{lang}>{label}{inline_html(note.text)}</p>'
+                f"<p>{inline_html(text)}</p>"
+            )
+        else:
+            content = f"<p>{label}{inline_html(text)}</p>"
         items.append(
-            f'<aside epub:type="footnote" class="footnote" id="n{note.id}">'
-            f"<p>{label}{inline_html(text)}</p></aside>"
+            f'<aside epub:type="footnote" class="footnote" id="n{note.id}">{content}</aside>'
         )
     return '<section class="footnotes" epub:type="footnotes">\n' + "\n".join(items) + "\n</section>"
+
+
+# Depois destes, o parágrafo começa sem recuo (h1 + p, p.image + p,
+# p.scene-break + p no DEFAULT_CSS).
+_SECTION_OPENERS = frozenset({"heading1", "heading2", "heading3", "scene_break", "spacer", "image"})
+
+
+def _starts_section(block: Block, previous_kind: str | None) -> bool:
+    # Um estilo escolhido à mão manda no recuo; não se mexe nele.
+    return previous_kind in _SECTION_OPENERS and not block.meta.get("style")
 
 
 def chapter_to_xhtml(
@@ -279,8 +375,15 @@ def chapter_to_xhtml(
     use_translation: bool = True,
     css_href: str = "../style.css",
     styled: Document | None = None,
+    layout: str | None = None,
+    source_language: str = "",
 ) -> str:
     """Gera o XHTML completo de um capítulo.
+
+    `layout` é o formato (LAYOUTS). Sem ele, vale `use_translation`: só a
+    tradução ou só o original, como sempre. Nos bilíngues, `language` é o da
+    tradução e `source_language` o do original, que vai em lang="" de cada
+    trecho original.
 
     Itens de lista consecutivos são embrulhados num <ul> para que o documento
     seja XHTML válido.
@@ -289,6 +392,9 @@ def chapter_to_xhtml(
     uses_styles): cada bloco de texto ganha a classe do estilo e o ajuste
     próprio em style="". Sem ele, o XHTML sai como sempre saiu.
     """
+    if layout is None:
+        layout = "translated" if use_translation else "original"
+    use_translation = layout != "original"
     parts: list[str] = []
     in_list = False
     # Tipo do último bloco que entrou no XHTML: o parágrafo logo depois de um
@@ -306,19 +412,31 @@ def chapter_to_xhtml(
     for block in chapter.blocks:
         if block.kind == "footnote":
             continue
-        styling = ""
+        bilingual = _is_bilingual(block, layout)
+        classes: list[str] = []
+        inline = ""
         if styled is not None and block.kind in book_styles.STYLED_KINDS:
             style_id = book_styles.block_style(styled, block, previous_kind)
-            styling = f' class="{book_styles.class_name(style_id)}"'
+            classes.append(book_styles.class_name(style_id))
             inline = book_styles.inline_style(block)
-            if inline:
-                styling += f' style="{html.escape(inline, quote=True)}"'
-        fragment = _block_to_xhtml(block, use_translation=use_translation, styling=styling)
+        if bilingual and block.kind == "paragraph" and _starts_section(block, previous_kind):
+            # No bilíngue, o <p> do original fica entre o título e a tradução, e
+            # o "h1 + p" do CSS deixa de pegar a tradução. A classe "first" (já
+            # no DEFAULT_CSS) tira o recuo dela, como antes.
+            classes.append("first")
+        styling = f' class="{" ".join(classes)}"' if classes else ""
+        if inline:
+            styling += f' style="{html.escape(inline, quote=True)}"'
+        fragment = _block_to_xhtml(
+            block, use_translation=use_translation, styling=styling, bilingual=bilingual
+        )
         if not fragment:
             continue
         previous_kind = block.kind
         if pending:
             fragment = _link_note_calls(fragment, pending, linked)
+        if bilingual:
+            fragment = fragment.replace(_SRC_SLOT, _source_xhtml(block, source_language), 1)
 
         is_item = block.kind == "list_item"
         if is_item and not in_list:
@@ -333,7 +451,15 @@ def chapter_to_xhtml(
     if in_list:
         parts.append("</ul>")
     if notes:
-        parts.append(_footnotes_xhtml(notes, linked, use_translation=use_translation))
+        parts.append(
+            _footnotes_xhtml(
+                notes,
+                linked,
+                use_translation=use_translation,
+                layout=layout,
+                source_language=source_language,
+            )
+        )
 
     body = "\n".join(parts)
     title = html.escape(chapter.title or "", quote=True)
@@ -412,7 +538,9 @@ _IMAGE_TYPES = {
 }
 
 
-def _content_opf(document: Document, filenames: list[str], language: str) -> str:
+def _content_opf(
+    document: Document, filenames: list[str], language: str, extra_language: str = ""
+) -> str:
     manifest = [
         '    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>',
         '    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>',
@@ -439,7 +567,7 @@ def _content_opf(document: Document, filenames: list[str], language: str) -> str
     <dc:identifier id="pub-id">{html.escape(document.identifier)}</dc:identifier>
     <dc:title>{html.escape(document.title)}</dc:title>
     <dc:language>{html.escape(language)}</dc:language>
-    <dc:creator id="creator">{author}</dc:creator>
+{f"    <dc:language>{html.escape(extra_language)}</dc:language>{chr(10)}" if extra_language else ""}    <dc:creator id="creator">{author}</dc:creator>
     <meta refines="#creator" property="role" scheme="marc:relators">aut</meta>
     <meta property="dcterms:modified">{modified}</meta>
   </metadata>
@@ -465,12 +593,19 @@ def write_epub(
     output_path: str | Path,
     *,
     use_translation: bool = True,
+    layout: str | None = None,
 ) -> Path:
     """Grava o Document como um arquivo EPUB 3 válido.
 
-    use_translation=False exporta o texto original, útil para comparar a
-    tradução com a fonte no mesmo leitor.
+    `layout` é o formato (LAYOUTS): "original", "translated" ou "paragraph"
+    (bilíngue). Sem ele, vale `use_translation`, como sempre.
     """
+    if layout is None:
+        layout = "translated" if use_translation else "original"
+    if layout not in LAYOUTS:
+        raise ValueError(f"Formato desconhecido: {layout}")
+    use_translation = layout != "original"
+    bilingual = layout in BILINGUAL_LAYOUTS
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -487,7 +622,9 @@ def write_epub(
         epub.writestr("META-INF/container.xml", CONTAINER_XML)
         styled = document if book_styles.uses_styles(document) else None
         epub.writestr("OEBPS/style.css", book_css(document))
-        epub.writestr("OEBPS/content.opf", _content_opf(document, filenames, language))
+        # No bilíngue, o OPF declara os dois idiomas; o principal é o da tradução.
+        extra = document.source_language if bilingual else ""
+        epub.writestr("OEBPS/content.opf", _content_opf(document, filenames, language, extra))
         epub.writestr("OEBPS/nav.xhtml", _nav_xhtml(document, filenames, language))
         epub.writestr("OEBPS/toc.ncx", _toc_ncx(document, filenames))
 
@@ -495,7 +632,11 @@ def write_epub(
             epub.writestr(
                 f"OEBPS/text/{name}",
                 chapter_to_xhtml(
-                    chapter, language=language, use_translation=use_translation, styled=styled
+                    chapter,
+                    language=language,
+                    styled=styled,
+                    layout=layout,
+                    source_language=document.source_language,
                 ),
             )
 

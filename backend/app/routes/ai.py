@@ -392,6 +392,11 @@ async def start_translation(
     }
 
 
+# Formatos do livro traduzido que se escolhem por livro: só a tradução ou o
+# bilíngue parágrafo a parágrafo (core/epub_write.LAYOUTS, menos o original).
+BOOK_LAYOUTS = ("translated", "paragraph")
+
+
 @router.put("/projects/{project_id}/translation")
 async def set_book_translation(
     project_id: str, payload: dict[str, Any] = Body(...)
@@ -399,13 +404,18 @@ async def set_book_translation(
     """Escolhe os idiomas e o provedor da tradução deste livro.
 
     Espera {"source_language": "en", "target_language": "pt-BR",
-    "provider_id": "..."}, com os códigos de core/importer.LANGUAGES. Um
-    provider_id vazio volta a seguir o provedor ativo nas configurações. Os
-    códigos vão para o documento (o EPUB usa), os nomes para o pedido ao modelo.
+    "provider_id": "...", "layout": "paragraph"}, com os códigos de
+    core/importer.LANGUAGES. Um provider_id vazio volta a seguir o provedor
+    ativo nas configurações. Os códigos vão para o documento (o EPUB usa), os
+    nomes para o pedido ao modelo. `layout` é o formato do livro traduzido
+    (BOOK_LAYOUTS); ausente, fica o que estava.
     """
     source = str(payload.get("source_language") or "")
     target = str(payload.get("target_language") or "")
     provider_id = str(payload.get("provider_id") or "")
+    layout = payload.get("layout")
+    if layout is not None and layout not in BOOK_LAYOUTS:
+        raise HTTPException(400, f"Formato do livro traduzido desconhecido: {layout}")
     for code in (source, target):
         if code not in LANGUAGES:
             raise HTTPException(400, f"Idioma desconhecido: {code or '(vazio)'}")
@@ -419,10 +429,13 @@ async def set_book_translation(
         document.language = target
 
     def change_meta(meta: ProjectMeta) -> None:
+        kept = layout or meta.translation.get("layout") or "translated"
         meta.translation = {
             "source_language": LANGUAGES[source],
             "target_language": LANGUAGES[target],
             **({"provider_id": provider_id} if provider_id else {}),
+            # Só a tradução é o padrão e não fica gravado, como sempre foi.
+            **({"layout": kept} if kept != "translated" else {}),
         }
 
     try:

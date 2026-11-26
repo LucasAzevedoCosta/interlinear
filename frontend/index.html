@@ -74,6 +74,10 @@
             <b>Traduzido</b>
             <span id="exportTranslatedHint">O que não foi traduzido sai no original</span>
           </button>
+          <button role="menuitem" id="exportBilingual">
+            <b>Bilíngue, parágrafo a parágrafo</b>
+            <span id="exportBilingualHint">O original menor, em cima de cada parágrafo traduzido</span>
+          </button>
         </span>
       </span>
       <button class="btn btn--quiet" id="settingsBtn">Configurações</button>
@@ -153,6 +157,7 @@
       <div class="preview__head">
         <span class="toggle" id="previewToggle">
           <button id="viewTranslated" aria-pressed="true">Tradução</button>
+          <button id="viewBilingual" aria-pressed="false" title="Original e tradução, parágrafo a parágrafo">Bilíngue</button>
           <button id="viewOriginal" aria-pressed="false">Original</button>
         </span>
         <span id="previewLabel" hidden>Como o original vai sair no leitor</span>
@@ -305,6 +310,25 @@
         provedor escolhido aqui vale só para este livro.
       </p>
     </div>
+
+    <fieldset class="field layout-choice">
+      <legend>Formato do livro traduzido</legend>
+      <label class="layout-choice__item">
+        <input type="radio" name="bookLayout" value="translated" checked/>
+        <span><b>Só a tradução</b>
+          <small>O livro todo traduzido, sem o original.</small></span>
+      </label>
+      <label class="layout-choice__item">
+        <input type="radio" name="bookLayout" value="paragraph"/>
+        <span><b>Original e tradução, parágrafo a parágrafo</b>
+          <small>Cada parágrafo do original, menor e em itálico, logo acima da
+          tradução dele.</small></span>
+      </label>
+      <p class="field__hint">
+        É o formato da prévia e o primeiro do menu Exportar. Os outros
+        continuam no menu, na hora de baixar.
+      </p>
+    </fieldset>
 
     <p class="field__hint" style="margin-bottom:14px">
       Estilo, glossário e tamanho do lote continuam nas configurações, iguais

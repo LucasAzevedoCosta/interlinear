@@ -37,7 +37,9 @@ const state = {
   jobTimer: null,
   // "convert" ou "translate": a etapa aberta (ver setStage).
   stage: 'convert',
-  previewTranslated: true,
+  // Formato da prévia na etapa de tradução: "translated", "paragraph"
+  // (bilíngue) ou "original". Começa no formato do livro (bookLayout).
+  previewLayout: 'translated',
   dirty: new Map(),
   saveTimer: null,
   // Trechos que a conversão provavelmente errou (ver loadSuspects).
@@ -623,6 +625,8 @@ async function openProject(projectId) {
     state.doc = data.document;
     state.chapterId = data.document.chapters[0]?.id || null;
     state.stage = initialStage(data.project);
+    state.previewLayout = bookLayout();
+    paintPreviewToggle();
     state.suspects = [];
     state.lastSuspect = null;
     state.review = { suggestions: [] };
@@ -2079,7 +2083,7 @@ function refreshPreview() {
   if (!state.project || !state.chapterId) return;
   const url =
     `/api/projects/${state.project.id}/preview/${state.chapterId}` +
-    `?translated=${state.stage === 'translate' && state.previewTranslated}&t=${Date.now()}`;
+    `?layout=${state.stage === 'translate' ? state.previewLayout : 'original'}&t=${Date.now()}`;
   $('previewFrame').src = url;
 }
 
@@ -2281,6 +2285,11 @@ async function openBookTranslation(thenTranslate) {
   }
   select.value = bookProvider().own?.id || '';
 
+  const layout = bookLayout();
+  for (const radio of document.querySelectorAll('input[name="bookLayout"]')) {
+    radio.checked = radio.value === layout;
+  }
+
   $('bookTranslationNote').textContent = thenTranslate
     ? 'Antes da primeira tradução, confirme de que idioma para qual este livro vai.'
     : 'Vale para as próximas traduções deste livro. O que já foi traduzido fica como está.';
@@ -2299,6 +2308,7 @@ async function saveBookTranslation(thenTranslate) {
     source_language: $('bookSource').value,
     target_language: $('bookTarget').value,
     provider_id: $('bookProvider').value,
+    layout: document.querySelector('input[name="bookLayout"]:checked')?.value || 'translated',
   };
   try {
     const data = await api(`/api/projects/${state.project.id}/translation`, {
@@ -2306,10 +2316,13 @@ async function saveBookTranslation(thenTranslate) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
+    const layoutChanged = bookLayout() !== (data.project.translation?.layout || 'translated');
     state.project = data.project;
     state.doc.source_language = body.source_language;
     state.doc.language = body.target_language;
     closeBookTranslation();
+    // A prévia acompanha o formato novo do livro.
+    if (layoutChanged) setPreviewMode(bookLayout());
     renderEditor();
     if (thenTranslate) startTranslation();
     else toast('Tradução deste livro salva');
@@ -3117,8 +3130,9 @@ function wire() {
     if ($('exportMenu').hidden) openExportMenu();
     else closeExportMenu();
   };
-  $('exportOriginal').onclick = () => exportEpub(false);
-  $('exportTranslated').onclick = () => exportEpub(true);
+  $('exportOriginal').onclick = () => exportEpub('original');
+  $('exportTranslated').onclick = () => exportEpub('translated');
+  $('exportBilingual').onclick = () => exportEpub('paragraph');
   document.addEventListener('click', (event) => {
     if (!event.target.closest('.menu-anchor')) {
       closeExportMenu();
@@ -3160,8 +3174,9 @@ function wire() {
   bindModelField();
   $('saveSettings').onclick = saveGeneralSettings;
 
-  $('viewTranslated').onclick = () => setPreviewMode(true);
-  $('viewOriginal').onclick = () => setPreviewMode(false);
+  $('viewTranslated').onclick = () => setPreviewMode('translated');
+  $('viewBilingual').onclick = () => setPreviewMode('paragraph');
+  $('viewOriginal').onclick = () => setPreviewMode('original');
   $('refreshPreview').onclick = refreshPreview;
 
   document.addEventListener('keydown', (event) => {
@@ -3185,14 +3200,19 @@ function wire() {
 function openExportMenu() {
   const translated = state.project?.translated_count || 0;
   $('exportTranslated').disabled = !translated;
+  $('exportBilingual').disabled = !translated;
   $('exportTranslatedHint').textContent = translated
     ? 'O que não foi traduzido sai no original'
+    : 'Nada traduzido ainda';
+  $('exportBilingualHint').textContent = translated
+    ? 'O original menor, em cima de cada parágrafo traduzido'
     : 'Nada traduzido ainda';
   closeReviewMenu();
   $('exportMenu').hidden = false;
   $('exportBtn').setAttribute('aria-expanded', 'true');
-  // Na etapa de tradução, o mais provável é querer o traduzido.
-  (state.stage === 'translate' && translated ? $('exportTranslated') : $('exportOriginal')).focus();
+  // Na etapa de tradução, o mais provável é querer o formato do livro.
+  const preferred = bookLayout() === 'paragraph' ? $('exportBilingual') : $('exportTranslated');
+  (state.stage === 'translate' && translated ? preferred : $('exportOriginal')).focus();
 }
 
 function closeExportMenu() {
@@ -3200,17 +3220,29 @@ function closeExportMenu() {
   $('exportBtn').setAttribute('aria-expanded', 'false');
 }
 
-async function exportEpub(translated) {
+// layout: "original", "translated" ou "paragraph" (bilíngue).
+async function exportEpub(layout) {
   closeExportMenu();
   await flushSaves();
-  window.location = `/api/projects/${state.project.id}/export?translated=${translated}`;
+  window.location = `/api/projects/${state.project.id}/export?layout=${layout}`;
 }
 
-function setPreviewMode(translated) {
-  state.previewTranslated = translated;
-  $('viewTranslated').setAttribute('aria-pressed', translated);
-  $('viewOriginal').setAttribute('aria-pressed', !translated);
+// O formato do livro traduzido (tela "Tradução deste livro"). Sem escolha,
+// só a tradução.
+function bookLayout() {
+  return state.project?.translation?.layout || 'translated';
+}
+
+function setPreviewMode(layout) {
+  state.previewLayout = layout;
+  paintPreviewToggle();
   refreshPreview();
+}
+
+function paintPreviewToggle() {
+  for (const [id, layout] of [['viewTranslated', 'translated'], ['viewBilingual', 'paragraph'], ['viewOriginal', 'original']]) {
+    $(id).setAttribute('aria-pressed', String(state.previewLayout === layout));
+  }
 }
 
 wire();

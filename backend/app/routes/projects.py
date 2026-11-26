@@ -15,7 +15,7 @@ from ..ai.review_apply import open_suspects
 from ..core import editing
 from ..core import styles as book_styles
 from ..core.blocks import Block, Chapter, Document, new_id
-from ..core.epub_write import book_css, chapter_to_xhtml, write_epub
+from ..core.epub_write import LAYOUTS, book_css, chapter_to_xhtml, write_epub
 from ..core.importer import ImportOptions, import_file
 from ..core.page_image import page_sizes, render_page
 from ..core.review import find_suspects
@@ -417,6 +417,7 @@ async def preview_chapter(
     project_id: str,
     chapter_id: str,
     translated: bool = Query(True, description="Mostrar a tradução ou o original"),
+    layout: str | None = Query(None, description="original, translated ou paragraph"),
 ) -> HTMLResponse:
     """Renderiza um capítulo exatamente como ele sairá no EPUB.
 
@@ -426,13 +427,15 @@ async def preview_chapter(
     document = await _load(get_store(), project_id)
     chapter = _find_chapter(document, chapter_id)
 
-    language = document.language if translated else document.source_language
+    chosen = _layout_param(layout, translated)
+    language = document.source_language if chosen == "original" else document.language
     xhtml = chapter_to_xhtml(
         chapter,
         language=language,
-        use_translation=translated,
         css_href=f"/api/projects/{project_id}/preview.css",
         styled=document if book_styles.uses_styles(document) else None,
+        layout=chosen,
+        source_language=document.source_language,
     )
     # Imagens do preview apontam para a rota de imagens do projeto.
     xhtml = xhtml.replace('src="../images/', f'src="/api/projects/{project_id}/images/')
@@ -565,20 +568,35 @@ async def project_source_page(project_id: str, page: int, dpi: int = Query(110))
     )
 
 
+# Como cada formato aparece no nome do arquivo exportado.
+_LAYOUT_SUFFIX = {"original": "original", "translated": "traduzido", "paragraph": "bilíngue"}
+
+
+def _layout_param(layout: str | None, translated: bool) -> str:
+    """O formato pedido: `layout`, ou o `translated` de antes (só os dois de sempre)."""
+    if layout is None:
+        return "translated" if translated else "original"
+    if layout not in LAYOUTS:
+        raise HTTPException(400, f"Formato desconhecido: {layout}")
+    return layout
+
+
 @router.get("/{project_id}/export")
 async def export_epub(
     project_id: str,
     translated: bool = Query(True),
+    layout: str | None = Query(None, description="original, translated ou paragraph"),
 ) -> FileResponse:
-    """Gera e devolve o EPUB final."""
+    """Gera e devolve o EPUB final, no formato pedido."""
+    chosen = _layout_param(layout, translated)
     store = get_store()
     document = await _load(store, project_id, with_images=True)
 
-    suffix = "traduzido" if translated else "original"
+    suffix = _LAYOUT_SUFFIX[chosen]
     safe_title = "".join(c for c in document.title if c.isalnum() or c in " -_").strip() or "livro"
     output = store.project_dir(project_id) / f"{safe_title} ({suffix}).epub"
 
-    await asyncio.to_thread(write_epub, document, output, use_translation=translated)
+    await asyncio.to_thread(write_epub, document, output, layout=chosen)
 
     return FileResponse(
         output,

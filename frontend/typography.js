@@ -84,7 +84,7 @@ const Typography = (() => {
     const opensSection = (kind) => HEADINGS.has(kind) || kind === 'scene_break' || kind === 'spacer';
     const chapter = chapterOf(block);
     if (!chapter) return 'paragraph';
-    const translated = state.stage === 'translate' && state.previewTranslated;
+    const translated = state.stage === 'translate' && state.previewLayout !== 'original';
     for (let i = chapter.blocks.indexOf(block) - 1; i >= 0; i -= 1) {
       const previous = chapter.blocks[i];
       if (previous.kind === 'footnote') continue;
