@@ -11,6 +11,7 @@ não é possível. Quem chama decide como gravar (ProjectStore.update).
 from __future__ import annotations
 
 from .blocks import TRANSLATABLE, Block, Chapter, Document, Vocabulary, join_hyphenated
+from .sentences import is_aligned
 
 
 class EditError(Exception):
@@ -108,6 +109,14 @@ def merge_with_next(document: Document, block_id: str) -> tuple[Chapter, Block]:
     merged.meta.pop("stale", None)
     if translated and (first.meta.get("stale") or second.meta.get("stale")):
         merged.meta["stale"] = True
+    # Frase a frase: as frases das duas metades, se as duas estavam
+    # alinhadas; senão o bloco junto não está alinhado.
+    merged.meta.pop("sentences", None)
+    merged.meta.pop("align_failed", None)
+    if translated and all(
+        is_aligned(b.text, b.translated, b.meta.get("sentences")) for b in (first, second)
+    ):
+        merged.meta["sentences"] = list(first.meta["sentences"]) + list(second.meta["sentences"])
     # Onde o bloco está no PDF: as duas metades, para o painel Original
     # destacar o parágrafo inteiro (inclusive o que atravessa a página).
     boxes = list(first.meta.get("boxes") or []) + list(second.meta.get("boxes") or [])

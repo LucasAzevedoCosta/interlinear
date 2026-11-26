@@ -193,7 +193,7 @@ def test_epub_so_traducao_tem_um_idioma(tmp_path):
 
 def test_formato_desconhecido_e_recusado(tmp_path):
     with pytest.raises(ValueError):
-        write_epub(Document(chapters=[_chapter()]), tmp_path / "x.epub", layout="sentence")
+        write_epub(Document(chapters=[_chapter()]), tmp_path / "x.epub", layout="lixo")
 
 
 # ---------------------------------------------------------------- rotas
@@ -238,7 +238,7 @@ def test_formato_do_livro_e_gravado_e_mantido(client, book):
 
 
 def test_formato_invalido_no_livro_e_400(client, book):
-    assert _put_translation(client, book, layout="sentence").status_code == 400
+    assert _put_translation(client, book, layout="lixo").status_code == 400
 
 
 def test_exportacao_bilingue(client, book):

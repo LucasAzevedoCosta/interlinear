@@ -233,9 +233,10 @@ def _block_to_xhtml(
 # --------------------------------------------------------------------------
 
 # "original" e "translated" são os de sempre; "paragraph" põe cada parágrafo
-# do original, menor e em itálico, logo antes da tradução dele.
-LAYOUTS = ("original", "translated", "paragraph")
-BILINGUAL_LAYOUTS = frozenset({"paragraph"})
+# do original, menor e em itálico, logo antes da tradução dele. "sentence" (frase
+# a frase) ainda sai como "paragraph": o XHTML por frase é a Fase 4 do plano.
+LAYOUTS = ("original", "translated", "paragraph", "sentence")
+BILINGUAL_LAYOUTS = frozenset({"paragraph", "sentence"})
 
 # Lugar do original dentro do fragmento da tradução. Trocado só depois de
 # ligar as chamadas de nota, para o <sup> do original não roubar o link.

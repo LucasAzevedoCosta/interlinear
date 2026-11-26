@@ -625,7 +625,7 @@ async function openProject(projectId) {
     state.doc = data.document;
     state.chapterId = data.document.chapters[0]?.id || null;
     state.stage = initialStage(data.project);
-    state.previewLayout = bookLayout();
+    state.previewLayout = bilingualPreview(bookLayout());
     paintPreviewToggle();
     state.suspects = [];
     state.lastSuspect = null;
@@ -2089,7 +2089,9 @@ function refreshPreview() {
 
 /* --------------------------------------------------------------- tradução */
 
-async function startTranslation() {
+// `extra` vai junto no pedido; com ele (o "Traduzir alinhado"), o livro todo,
+// sem perguntar.
+async function startTranslation(extra = null) {
   if (!state.project) return;
   // Um livro vindo da conversão ainda não disse de que idioma para qual vai.
   if (!state.project.translation?.source_language) {
@@ -2098,7 +2100,7 @@ async function startTranslation() {
   }
   await flushSaves();
 
-  const whole = confirm(
+  const whole = extra ? true : confirm(
     'Traduzir o livro inteiro?\n\n' +
     'OK traduz tudo o que ainda falta.\n' +
     'Cancelar traduz apenas o capítulo aberto.'
@@ -2107,6 +2109,7 @@ async function startTranslation() {
   const body = {
     glossary: parseGlossary($('glossary').value),
     chapter_ids: whole ? [] : [state.chapterId],
+    ...(extra || {}),
   };
 
   try {
@@ -2288,7 +2291,10 @@ async function openBookTranslation(thenTranslate) {
   const layout = bookLayout();
   for (const radio of document.querySelectorAll('input[name="bookLayout"]')) {
     radio.checked = radio.value === layout;
+    radio.onchange = paintAlignment;
   }
+  state.alignment = null;
+  paintAlignment();
 
   $('bookTranslationNote').textContent = thenTranslate
     ? 'Antes da primeira tradução, confirme de que idioma para qual este livro vai.'
@@ -2299,11 +2305,59 @@ async function openBookTranslation(thenTranslate) {
   (thenTranslate ? $('saveAndTranslate') : $('bookSource')).focus();
 }
 
+// Frase a frase num livro que já tem tradução: quantos parágrafos estão
+// alinhados e o botão para traduzir de novo, alinhado, os que não estão.
+async function paintAlignment() {
+  const box = $('bookAlignment');
+  const chosen = document.querySelector('input[name="bookLayout"]:checked')?.value;
+  if (chosen !== 'sentence' || !state.project?.translated_count) {
+    box.hidden = true;
+    return;
+  }
+  if (!state.alignment) {
+    try {
+      state.alignment = await api(`/api/projects/${state.project.id}/alignment`);
+    } catch (error) {
+      toast(error.message, 'error');
+      return;
+    }
+  }
+  const { translated, aligned, unaligned, edited } = state.alignment;
+  box.hidden = false;
+  $('bookAlignmentStatus').textContent = unaligned
+    ? `${aligned} de ${translated} parágrafos traduzidos estão frase a frase. ` +
+      `Os outros ${unaligned} saem parágrafo a parágrafo até serem traduzidos de novo, alinhados.`
+    : `Todos os ${translated} parágrafos traduzidos estão frase a frase.`;
+  $('bookAlignmentEditedLabel').hidden = !edited;
+  $('bookAlignmentEdited').checked = false;
+  $('bookAlignmentEditedText').textContent =
+    `Incluir ${edited === 1 ? 'a tradução feita' : `as ${edited} traduções feitas`} à mão ` +
+    '(a tradução nova substitui o que você escreveu)';
+  $('bookAlign').hidden = !unaligned;
+  $('bookAlign').textContent = `Traduzir alinhado (${unaligned - (edited || 0)} parágrafos)`;
+  $('bookAlignmentEdited').onchange = () => {
+    const count = unaligned - ($('bookAlignmentEdited').checked ? 0 : edited);
+    $('bookAlign').textContent = `Traduzir alinhado (${count} parágrafos)`;
+  };
+}
+
+// Grava o formato frase a frase e traduz de novo, alinhado, o que não está.
+async function alignBook() {
+  const includeEdited = $('bookAlignmentEdited').checked;
+  if (includeEdited && !confirm('As traduções feitas à mão serão substituídas pela tradução nova. Continuar?')) {
+    return;
+  }
+  if (!(await saveBookTranslation(false, true))) return;
+  state.alignment = null;
+  startTranslation({ align: true, include_edited: includeEdited });
+}
+
 function closeBookTranslation() {
   $('bookTranslationSheet').hidden = true;
 }
 
-async function saveBookTranslation(thenTranslate) {
+// quiet: sem aviso de "salva" (quem chama segue para outra coisa). Devolve se gravou.
+async function saveBookTranslation(thenTranslate, quiet = false) {
   const body = {
     source_language: $('bookSource').value,
     target_language: $('bookTarget').value,
@@ -2322,12 +2376,14 @@ async function saveBookTranslation(thenTranslate) {
     state.doc.language = body.target_language;
     closeBookTranslation();
     // A prévia acompanha o formato novo do livro.
-    if (layoutChanged) setPreviewMode(bookLayout());
+    if (layoutChanged) setPreviewMode(bilingualPreview(bookLayout()));
     renderEditor();
     if (thenTranslate) startTranslation();
-    else toast('Tradução deste livro salva');
+    else if (!quiet) toast('Tradução deste livro salva');
+    return true;
   } catch (error) {
     toast(error.message, 'error');
+    return false;
   }
 }
 
@@ -3074,6 +3130,7 @@ function wire() {
   };
   $('saveBookTranslation').onclick = () => saveBookTranslation(false);
   $('saveAndTranslate').onclick = () => saveBookTranslation(true);
+  $('bookAlign').onclick = alignBook;
   $('importOcr').onchange = syncOcrFields;
   const closeImport = () => { state.pendingFile = null; $('importSheet').hidden = true; };
   $('closeImport').onclick = closeImport;
@@ -3175,7 +3232,7 @@ function wire() {
   $('saveSettings').onclick = saveGeneralSettings;
 
   $('viewTranslated').onclick = () => setPreviewMode('translated');
-  $('viewBilingual').onclick = () => setPreviewMode('paragraph');
+  $('viewBilingual').onclick = () => setPreviewMode(bookLayout() === 'sentence' ? 'sentence' : 'paragraph');
   $('viewOriginal').onclick = () => setPreviewMode('original');
   $('refreshPreview').onclick = refreshPreview;
 
@@ -3233,6 +3290,12 @@ function bookLayout() {
   return state.project?.translation?.layout || 'translated';
 }
 
+// O formato da prévia para um formato do livro. O botão "Bilíngue" mostra o
+// bilíngue do livro (parágrafo ou frase a frase).
+function bilingualPreview(layout) {
+  return layout === 'sentence' || layout === 'paragraph' ? layout : 'translated';
+}
+
 function setPreviewMode(layout) {
   state.previewLayout = layout;
   paintPreviewToggle();
@@ -3240,9 +3303,10 @@ function setPreviewMode(layout) {
 }
 
 function paintPreviewToggle() {
-  for (const [id, layout] of [['viewTranslated', 'translated'], ['viewBilingual', 'paragraph'], ['viewOriginal', 'original']]) {
-    $(id).setAttribute('aria-pressed', String(state.previewLayout === layout));
-  }
+  const bilingual = state.previewLayout === 'paragraph' || state.previewLayout === 'sentence';
+  $('viewTranslated').setAttribute('aria-pressed', String(state.previewLayout === 'translated'));
+  $('viewBilingual').setAttribute('aria-pressed', String(bilingual));
+  $('viewOriginal').setAttribute('aria-pressed', String(state.previewLayout === 'original'));
 }
 
 wire();

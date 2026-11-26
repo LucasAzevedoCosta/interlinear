@@ -1576,6 +1576,21 @@ button {
 .layout-choice__item b { display: block; font-weight: 600; color: var(--on-bench); }
 .layout-choice__item small { display: block; font-size: 11px; color: var(--on-bench-dim); margin-top: 2px; line-height: 1.45; }
 
+/* Frase a frase num livro já traduzido: quantos estão alinhados. */
+.alignment {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 0 4px;
+  padding: 10px;
+  border-left: 2px solid var(--pencil);
+  background: var(--bench-deep);
+  border-radius: var(--radius);
+}
+.alignment__status { margin: 0; font-size: 12px; line-height: 1.5; color: var(--on-bench); }
+.alignment__edited { display: flex; gap: 6px; align-items: flex-start; font-size: 12px; color: var(--on-bench-dim); }
+.alignment .btn { align-self: flex-start; }
+
 /* Seletor de modelo: campo de escrever com lista embaixo, e uma seta que
    abre a lista como num select. Escrever continua valendo: há serviços que
    aceitam modelos que não listam. */

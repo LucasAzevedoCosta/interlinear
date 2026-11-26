@@ -232,6 +232,10 @@ async def update_blocks(project_id: str, payload: dict[str, Any] = Body(...)) ->
                 block.translated = None if value is None else str(value)
                 block.meta.pop("stale", None)
                 block.meta.pop("refused", None)
+                # A tradução do parágrafo inteiro, editada à mão, não corresponde
+                # mais às frases gravadas (formato frase a frase).
+                block.meta.pop("sentences", None)
+                block.meta.pop("align_failed", None)
             if "kind" in update and update["kind"]:
                 editing.set_kind(block, str(update["kind"]))
             # Estilo e ajuste do bloco têm campo próprio e são validados
@@ -569,7 +573,12 @@ async def project_source_page(project_id: str, page: int, dpi: int = Query(110))
 
 
 # Como cada formato aparece no nome do arquivo exportado.
-_LAYOUT_SUFFIX = {"original": "original", "translated": "traduzido", "paragraph": "bilíngue"}
+_LAYOUT_SUFFIX = {
+    "original": "original",
+    "translated": "traduzido",
+    "paragraph": "bilíngue",
+    "sentence": "frase a frase",
+}
 
 
 def _layout_param(layout: str | None, translated: bool) -> str:

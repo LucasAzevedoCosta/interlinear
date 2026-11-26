@@ -13,6 +13,12 @@ parágrafos mantendo coerência entre eles. Os problemas reais são:
     vizinhos como contexto somente-leitura.
   * **Interrupção.** O progresso é salvo a cada lote, então fechar o navegador
     ou perder a conexão não joga fora o que já foi feito.
+  * **Frase a frase.** No formato bilíngue frase a frase, cada parágrafo é
+    dividido em frases (core/sentences.py) e cada frase ganha o seu marcador.
+    O modelo vê o parágrafo inteiro, mas devolve uma tradução por frase, e o
+    resultado vai para block.meta["sentences"]. Se não vier alinhado nem na
+    segunda tentativa, o parágrafo é traduzido inteiro e marcado
+    meta["align_failed"]: sai parágrafo a parágrafo.
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from ..core.blocks import Block
+from ..core.sentences import join_sentences, split_sentences
 from .base import Message, PlanLimitError, Provider, ProviderError, Usage
 
 log = logging.getLogger(__name__)
@@ -65,6 +72,10 @@ class TranslationSettings:
     context_blocks: int = 1
     concurrency: int = 3
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
+    # Formato frase a frase: traduz alinhado, uma tradução por frase.
+    aligned: bool = False
+    # Código do idioma do original ("en", "pt-BR"), para dividir as frases.
+    source_code: str = ""
 
 
 @dataclass
@@ -238,6 +249,64 @@ def _context_text(before: Sequence[Block], after: Sequence[Block]) -> str:
 
 
 # --------------------------------------------------------------------------
+# Frase a frase
+# --------------------------------------------------------------------------
+
+
+class Aligned(str):
+    """Tradução de um parágrafo feita frase a frase.
+
+    O valor é a tradução inteira (as frases juntadas), que vai para
+    block.translated como qualquer outra; `pairs` são os pares (frase do
+    original, tradução dela), que vão para block.meta["sentences"].
+    """
+
+    pairs: list[tuple[str, str]]
+
+    def __new__(cls, pairs: list[tuple[str, str]]) -> "Aligned":
+        value = str.__new__(cls, join_sentences([target for _, target in pairs]))
+        value.pairs = pairs
+        return value
+
+
+# Decisão do usuário (2026-11-26): natural, não ao pé da letra, mas sempre o
+# mais fiel possível; e o conteúdo de cada frase fica no par dela, porque a
+# tradução é mostrada frase a frase embaixo do original.
+_ALIGNED_RULES = (
+    "Estas são frases, agrupadas pelo parágrafo de onde vêm ([Parágrafo n]). A "
+    "tradução vai ser mostrada frase a frase: cada frase do original seguida da "
+    "tradução dela.\n"
+    "- Leia o parágrafo inteiro para entender o contexto.\n"
+    "- Traduza cada frase de forma natural em {target}, sem ser palavra por "
+    "palavra, mas sempre o mais fiel possível ao sentido e ao tom do original.\n"
+    "- Devolva exatamente uma tradução por marcador, na mesma ordem. O que está "
+    "numa frase do original fica na tradução dela: não passe parte de uma frase "
+    "para a vizinha, não junte nem divida frases.\n"
+    "- Não repita as linhas [Parágrafo n]."
+)
+
+_PARAGRAPH_LABEL = re.compile(r"^\s*\[\s*Par[áa]grafo\s+\d+\s*\]\s*$", re.MULTILINE | re.IGNORECASE)
+
+
+def _format_aligned(groups: Sequence[Sequence[str]]) -> str:
+    """As frases numeradas em sequência, com o parágrafo de cada uma."""
+    parts: list[str] = []
+    number = 0
+    for index, sentences in enumerate(groups, start=1):
+        lines = [f"[Parágrafo {index}]"]
+        for sentence in sentences:
+            number += 1
+            lines.append(f"{_MARKER.format(n=number)}\n{sentence}")
+        parts.append("\n\n".join(lines))
+    return "\n\n".join(parts)
+
+
+def _clean_aligned(segment: str) -> str:
+    """Tira de um segmento as linhas [Parágrafo n] que o modelo repetir."""
+    return _PARAGRAPH_LABEL.sub("", segment).strip()
+
+
+# --------------------------------------------------------------------------
 # Tradutor
 # --------------------------------------------------------------------------
 
@@ -364,6 +433,114 @@ class Translator:
 
         return results, usage
 
+    async def translate_batch_aligned(
+        self,
+        batch: Sequence[Block],
+        *,
+        before: Sequence[Block] = (),
+        after: Sequence[Block] = (),
+    ) -> tuple[list[str], Usage]:
+        """Traduz um lote frase a frase.
+
+        Cada item devolvido é um Aligned (alinhou), um str (não alinhou nem
+        sozinho: tradução do parágrafo inteiro), "" (falhou) ou uma Refusal.
+        """
+        if not batch:
+            return [], Usage()
+        groups = [self._sentences_of(block) for block in batch]
+        total = sum(len(group) for group in groups)
+        completion = await self.provider.complete_with_retry(
+            [self._system_message(), self._aligned_message(groups, total, before, after)],
+            client=self.client,
+        )
+        segments = _parse_segments(completion.text, total)
+        if segments is None:
+            log.warning(
+                "Lote alinhado de %d frases voltou fora do formato; um parágrafo por vez", total
+            )
+            return await self._translate_aligned_individually(
+                batch, groups, base_usage=completion.usage
+            )
+
+        results: list[str] = []
+        redo: list[int] = []
+        cursor = 0
+        for index, (block, group) in enumerate(zip(batch, groups)):
+            targets = [_clean_aligned(s) for s in segments[cursor : cursor + len(group)]]
+            cursor += len(group)
+            aligned = Aligned(list(zip(group, targets)))
+            if not all(targets) or looks_like_refusal(aligned, block.text):
+                redo.append(index)
+                results.append("")
+            else:
+                results.append(aligned)
+        usage = completion.usage
+        if redo:
+            # Frase vazia ou recusa: o parágrafo tenta de novo sozinho.
+            again, usage = await self._translate_aligned_individually(
+                [batch[i] for i in redo], [groups[i] for i in redo], base_usage=usage
+            )
+            for index, result in zip(redo, again):
+                results[index] = result
+        return results, usage
+
+    def _sentences_of(self, block: Block) -> list[str]:
+        return split_sentences(block.text, self.settings.source_code) or [block.text]
+
+    def _aligned_message(
+        self,
+        groups: Sequence[Sequence[str]],
+        total: int,
+        before: Sequence[Block] = (),
+        after: Sequence[Block] = (),
+    ) -> Message:
+        rules = _ALIGNED_RULES.format(target=self.settings.target_language)
+        return Message(
+            role="user",
+            content=(
+                f"Traduza as {total} frases abaixo. Devolva cada uma precedida do "
+                "seu marcador ⟦n⟧, na mesma ordem, sem nenhum texto adicional.\n\n"
+                f"{rules}"
+                f"{_context_text(before, after)}\n\n"
+                f"Segmentos a traduzir:\n\n{_format_aligned(groups)}"
+            ),
+        )
+
+    async def _translate_aligned_individually(
+        self, batch: Sequence[Block], groups: Sequence[Sequence[str]], *, base_usage: Usage
+    ) -> tuple[list[str], Usage]:
+        """Plano B: um parágrafo por pedido, ainda frase a frase.
+
+        Se nem assim alinhar, o parágrafo é traduzido inteiro (plano C, o
+        mesmo do modo normal): sai parágrafo a parágrafo, com align_failed.
+        """
+        usage = base_usage
+        results: list[str] = []
+        for block, group in zip(batch, groups):
+            try:
+                completion = await self.provider.complete_with_retry(
+                    [self._system_message(), self._aligned_message([group], len(group))],
+                    client=self.client,
+                )
+            except ProviderError as exc:
+                if is_fatal(exc) or isinstance(exc, PlanLimitError):
+                    raise
+                log.error("Falha ao traduzir alinhado o bloco %s: %s", block.id, exc)
+                results.append("")
+                continue
+            usage = usage + completion.usage
+            segments = _parse_segments(completion.text, len(group))
+            if segments is not None:
+                targets = [_clean_aligned(s) for s in segments]
+                aligned = Aligned(list(zip(group, targets)))
+                if all(targets) and not looks_like_refusal(aligned, block.text):
+                    results.append(aligned)
+                    continue
+            log.warning("Bloco %s não alinhou; traduzindo o parágrafo inteiro", block.id)
+            whole, usage = await self._translate_individually([block], base_usage=usage)
+            results.append(whole[0])
+        return results, usage
+
     async def translate_blocks(
         self,
         blocks: Sequence[Block],
@@ -439,9 +616,12 @@ class Translator:
                     if halted():
                         return
                     try:
-                        segments, usage = await self.translate_batch(
-                            batch, before=before, after=after
+                        translate = (
+                            self.translate_batch_aligned
+                            if self.settings.aligned
+                            else self.translate_batch
                         )
+                        segments, usage = await translate(batch, before=before, after=after)
                         break
                     except PlanLimitError as exc:
                         # Não é falha do lote: espera a janela renovar e refaz.
@@ -466,8 +646,9 @@ class Translator:
                         block.meta["refused"] = str(translation)
                         progress.refused += 1
                     elif translation:
-                        block.translated = translation
+                        block.translated = str(translation)
                         block.meta.pop("refused", None)
+                        _record_alignment(block, translation, aligned=self.settings.aligned)
                         progress.done += 1
                     else:
                         progress.failed += 1
@@ -493,6 +674,21 @@ class Translator:
                 status=exc.status,
             ) from exc
         return progress
+
+
+def _record_alignment(block: Block, translation: str, *, aligned: bool) -> None:
+    """Guarda (ou tira) as frases da tradução nova em block.meta.
+
+    - frase a frase e alinhou: meta["sentences"] com os pares;
+    - frase a frase e não alinhou: meta["align_failed"], sem frases;
+    - formato normal: nada (as frases de uma tradução anterior não valem mais).
+    """
+    block.meta.pop("sentences", None)
+    block.meta.pop("align_failed", None)
+    if isinstance(translation, Aligned):
+        block.meta["sentences"] = [{"src": src, "tgt": tgt} for src, tgt in translation.pairs]
+    elif aligned:
+        block.meta["align_failed"] = True
 
 
 def _clean_single(text: str) -> str:

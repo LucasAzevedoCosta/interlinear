@@ -20,6 +20,7 @@ from ..ai.translator import Progress, TranslationSettings, Translator
 from ..config import REVIEW_MODES, ProviderProfile, Settings, clamp_threshold
 from ..core.blocks import TRANSLATABLE, Block, Document
 from ..core.importer import LANGUAGES
+from ..core.sentences import is_aligned
 from ..core.storage import ProjectMeta
 from ..deps import get_settings_store, get_store
 from ..jobs import registry
@@ -273,6 +274,14 @@ async def start_translation(
 
     retranslate = bool(payload.get("retranslate"))
     chapter_ids = payload.get("chapter_ids") or []
+    # Frase a frase: a tradução sai alinhada, uma por frase.
+    aligned = own.get("layout") == "sentence"
+    # "Traduzir alinhado": refaz também o que já está traduzido mas não está
+    # frase a frase. Traduções feitas à mão (meta.edited) só com include_edited.
+    align = bool(payload.get("align"))
+    include_edited = bool(payload.get("include_edited"))
+    if align and not aligned:
+        raise HTTPException(400, "Escolha o formato frase a frase antes de traduzir alinhado.")
 
     candidates = []
     for chapter in document.chapters:
@@ -283,7 +292,13 @@ async def start_translation(
                 continue
             if not block.text.strip():
                 continue
-            if not retranslate and block.translated and not block.meta.get("stale"):
+            pending = retranslate or not block.translated or block.meta.get("stale")
+            unaligned = (
+                align
+                and not is_aligned(block.text, block.translated, block.meta.get("sentences"))
+                and (include_edited or not block.meta.get("edited"))
+            )
+            if not (pending or unaligned):
                 continue
             candidates.append(block)
 
@@ -313,6 +328,8 @@ async def start_translation(
             else settings.context_blocks
         ),
         concurrency=int(payload.get("concurrency") or settings.concurrency),
+        aligned=aligned,
+        source_code=document.source_language,
     )
 
     job_id = uuid.uuid4().hex[:12]
@@ -332,6 +349,8 @@ async def start_translation(
     for block in candidates:
         block.translated = None
         block.meta.pop("refused", None)
+        block.meta.pop("sentences", None)
+        block.meta.pop("align_failed", None)
 
     def persist() -> None:
         project_store.update(
@@ -392,9 +411,37 @@ async def start_translation(
     }
 
 
-# Formatos do livro traduzido que se escolhem por livro: só a tradução ou o
-# bilíngue parágrafo a parágrafo (core/epub_write.LAYOUTS, menos o original).
-BOOK_LAYOUTS = ("translated", "paragraph")
+# Formatos do livro traduzido que se escolhem por livro: só a tradução, o
+# bilíngue parágrafo a parágrafo e o frase a frase (core/epub_write.LAYOUTS,
+# menos o original). O frase a frase muda também a tradução: alinhada.
+BOOK_LAYOUTS = ("translated", "paragraph", "sentence")
+
+
+@router.get("/projects/{project_id}/alignment")
+async def book_alignment(project_id: str) -> dict[str, Any]:
+    """Quantos parágrafos traduzidos estão frase a frase.
+
+    `unaligned` são os traduzidos sem frases (traduzidos antes de o livro
+    passar a frase a frase, ou que não alinharam: `failed`); `edited`, quantos
+    destes foram traduzidos à mão, que o "Traduzir alinhado" só refaz se o
+    usuário confirmar.
+    """
+    try:
+        document = await asyncio.to_thread(get_store().load_document, project_id)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(404, "Projeto não encontrado") from exc
+    counts = {"translated": 0, "aligned": 0, "unaligned": 0, "edited": 0, "failed": 0}
+    for block in document.all_blocks():
+        if block.kind not in TRANSLATABLE or not block.text.strip() or not block.translated:
+            continue
+        counts["translated"] += 1
+        if is_aligned(block.text, block.translated, block.meta.get("sentences")):
+            counts["aligned"] += 1
+            continue
+        counts["unaligned"] += 1
+        counts["edited"] += bool(block.meta.get("edited"))
+        counts["failed"] += bool(block.meta.get("align_failed"))
+    return counts
 
 
 @router.put("/projects/{project_id}/translation")
@@ -505,6 +552,12 @@ def _apply_translations(
         target.translated = block.translated
         target.meta.pop("refused", None)
         written[block.id] = block.translated
+        # As frases da tradução nova (frase a frase), ou nenhuma.
+        for key in ("sentences", "align_failed"):
+            if key in block.meta:
+                target.meta[key] = block.meta[key]
+            else:
+                target.meta.pop(key, None)
         # Atualizada, se traduziu o original que está lá. Se o usuário mudou o
         # original durante a tarefa, a tradução já nasce desatualizada.
         if target.text == block.text:

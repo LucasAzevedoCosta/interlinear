@@ -324,6 +324,22 @@
           <small>Cada parágrafo do original, menor e em itálico, logo acima da
           tradução dele.</small></span>
       </label>
+      <label class="layout-choice__item">
+        <input type="radio" name="bookLayout" value="sentence"/>
+        <span><b>Original e tradução, frase a frase</b>
+          <small>Cada frase do original seguida da tradução dela. A tradução é
+          feita frase a frase: natural, não ao pé da letra, mas o mais fiel
+          possível. Parágrafos já traduzidos precisam ser traduzidos de novo
+          para ficar frase a frase.</small></span>
+      </label>
+      <div class="alignment" id="bookAlignment" hidden aria-live="polite">
+        <p class="alignment__status" id="bookAlignmentStatus"></p>
+        <label class="alignment__edited" id="bookAlignmentEditedLabel" hidden>
+          <input type="checkbox" id="bookAlignmentEdited"/>
+          <span id="bookAlignmentEditedText"></span>
+        </label>
+        <button class="btn" id="bookAlign" type="button">Traduzir alinhado</button>
+      </div>
       <p class="field__hint">
         É o formato da prévia e o primeiro do menu Exportar. Os outros
         continuam no menu, na hora de baixar.

@@ -401,6 +401,23 @@ def _join_tags(text: str) -> str:
     return _SPLIT_TAGS.sub(undo, text)
 
 
+def is_aligned(text: str, translated: str | None, sentences: object) -> bool:
+    """As frases gravadas (meta["sentences"]) ainda valem para este bloco?
+
+    Valem se juntas dão o original de agora e todas têm tradução. Mudar o
+    original depois da tradução desfaz o alinhamento (e o bloco já fica
+    desatualizado, meta["stale"]).
+    """
+    if not translated or not isinstance(sentences, list) or not sentences:
+        return False
+    try:
+        sources = [str(pair["src"]) for pair in sentences]
+        targets = [str(pair["tgt"]) for pair in sentences]
+    except (KeyError, TypeError):
+        return False
+    return all(t.strip() for t in targets) and join_sentences(sources) == text
+
+
 def join_sentences(sentences: list[str]) -> str:
     """O texto de volta, a partir das frases (inverso de split_sentences)."""
     return _join_tags(" ".join(sentence.strip() for sentence in sentences if sentence.strip()))
